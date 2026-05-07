@@ -1,6 +1,7 @@
 import { router } from 'expo-router';
 import { Pressable, StyleSheet, View } from 'react-native';
 
+import { NamePlaque } from '@/components/logo';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Colors } from '@/constants/theme';
@@ -12,7 +13,7 @@ export default function SplashScreen() {
   return (
     <ThemedView style={[styles.screen, { backgroundColor: c.background }]}>
       <View style={styles.brandBlock}>
-        <ThemedText style={[styles.brand, { color: c.text }]}>quad</ThemedText>
+        <NamePlaque size="xl" align="vertical" />
         <ThemedText style={[styles.subtitle, { color: c.textSecondary }]}>
           your campus, in your pocket
         </ThemedText>
@@ -63,13 +64,7 @@ const styles = StyleSheet.create({
   },
   brandBlock: {
     alignItems: 'center',
-    gap: 8,
-  },
-  brand: {
-    fontSize: 64,
-    fontWeight: '700',
-    letterSpacing: -2,
-    lineHeight: 68,
+    gap: 16,
   },
   subtitle: {
     fontSize: 14,

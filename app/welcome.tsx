@@ -1,6 +1,7 @@
 import { router } from 'expo-router';
 import { Pressable, StyleSheet, View } from 'react-native';
 
+import { NamePlaque } from '@/components/logo';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Colors } from '@/constants/theme';
@@ -36,7 +37,7 @@ export default function WelcomeScreen() {
     <ThemedView style={[styles.screen, { backgroundColor: c.background }]}>
       <View style={styles.content}>
         <View style={styles.heroBlock}>
-          <ThemedText style={[styles.brand, { color: c.text }]}>quad</ThemedText>
+          <NamePlaque size="lg" />
           <ThemedText style={[styles.tagline, { color: c.textSecondary }]}>
             The campus app for gigs and hangouts.
           </ThemedText>
@@ -95,13 +96,7 @@ const styles = StyleSheet.create({
   },
   heroBlock: {
     alignItems: 'flex-start',
-    gap: 10,
-  },
-  brand: {
-    fontSize: 48,
-    fontWeight: '700',
-    letterSpacing: -1.5,
-    lineHeight: 52,
+    gap: 14,
   },
   tagline: {
     fontSize: 17,

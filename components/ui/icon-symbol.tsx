@@ -20,6 +20,7 @@ const MAPPING = {
   'chevron.right': 'chevron-right',
   'briefcase.fill': 'work',
   'person.3.fill': 'groups',
+  'map.fill': 'map',
   'plus': 'add',
   'mappin.and.ellipse': 'location-on',
   'clock.fill': 'schedule',

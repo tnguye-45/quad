@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>quad — Roadmap to a Functional App</title>
+<style>
+  @page { size: Letter; margin: 0.75in; }
+  * { box-sizing: border-box; }
+  html, body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: #111827;
+    line-height: 1.55;
+    font-size: 11pt;
+    margin: 0;
+    background: #fff;
+  }
+  h1 {
+    font-size: 28pt;
+    margin: 0 0 4pt 0;
+    letter-spacing: -0.6pt;
+    color: #111827;
+  }
+  h2 {
+    font-size: 16pt;
+    margin: 24pt 0 8pt 0;
+    padding-top: 14pt;
+    border-top: 1pt solid #e5e7eb;
+    letter-spacing: -0.3pt;
+    page-break-after: avoid;
+  }
+  h2.no-rule { border-top: 0; padding-top: 0; }
+  h3 {
+    font-size: 12pt;
+    margin: 16pt 0 6pt 0;
+    color: #1f2937;
+    page-break-after: avoid;
+  }
+  p { margin: 8pt 0; }
+  ul, ol { margin: 6pt 0; padding-left: 22pt; }
+  li { margin: 3pt 0; }
+  .checklist { list-style: none; padding-left: 4pt; }
+  .checklist li { padding-left: 22pt; position: relative; margin: 4pt 0; }
+  .checklist li::before {
+    content: "";
+    position: absolute;
+    left: 0; top: 4pt;
+    width: 11pt; height: 11pt;
+    border: 1pt solid #9ca3af;
+    border-radius: 2pt;
+    background: #fff;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 10pt 0 14pt 0;
+    font-size: 10.5pt;
+  }
+  th, td {
+    border: 1pt solid #e5e7eb;
+    padding: 6pt 9pt;
+    text-align: left;
+    vertical-align: top;
+  }
+  th {
+    background: #f3f4f6;
+    font-weight: 600;
+  }
+  hr {
+    border: 0;
+    border-top: 1pt solid #e5e7eb;
+    margin: 18pt 0;
+  }
+  .lede {
+    color: #4b5563;
+    font-size: 11.5pt;
+    margin-bottom: 24pt;
+  }
+  .phase-meta {
+    color: #6b7280;
+    font-size: 10pt;
+    font-style: italic;
+    margin: -4pt 0 12pt 0;
+  }
+  .done-when {
+    background: #f9fafb;
+    border-left: 3pt solid #111827;
+    padding: 8pt 12pt;
+    margin: 12pt 0 0 0;
+    font-size: 10.5pt;
+  }
+  .done-when strong { font-weight: 600; }
+  code {
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 9.5pt;
+    background: #f3f4f6;
+    padding: 1pt 4pt;
+    border-radius: 2pt;
+  }
+  .footer-note {
+    margin-top: 18pt;
+    padding-top: 10pt;
+    border-top: 1pt solid #e5e7eb;
+    font-size: 9.5pt;
+    color: #6b7280;
+  }
+  .brand-row {
+    display: flex;
+    align-items: center;
+    gap: 10pt;
+    margin-bottom: 18pt;
+  }
+  .brand-mark {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr 1fr;
+    gap: 3pt;
+    width: 26pt;
+    height: 26pt;
+  }
+  .brand-mark span {
+    border-radius: 2pt;
+    background: #111827;
+  }
+  .brand-mark span.dim { background: #d1d5db; }
+  .brand-name {
+    font-size: 22pt;
+    font-weight: 700;
+    letter-spacing: -0.8pt;
+  }
+  .page-break { page-break-before: always; }
+</style>
+</head>
+<body>
+
+<div class="brand-row">
+  <div class="brand-mark">
+    <span></span><span class="dim"></span>
+    <span class="dim"></span><span></span>
+  </div>
+  <div class="brand-name">quad</div>
+</div>
+
+<h1>Roadmap to a Functional App</h1>
+<p class="lede">A summer-scale plan to take <strong>quad</strong> from a visual prototype with mock data to a real app where Notre Dame students can find gigs, join hangouts, and message one another.</p>
+
+<h2 class="no-rule">Where we are today</h2>
+<table>
+  <thead><tr><th style="width:30%">Layer</th><th>Status</th></tr></thead>
+  <tbody>
+    <tr><td>Visual design</td><td>Done — splash, welcome, gigs feed, map, hangouts, messages inbox, chat threads</td></tr>
+    <tr><td>Routing</td><td>Done — expo-router with stack + tabs</td></tr>
+    <tr><td>Brand</td><td>Done — logo, NamePlaque, grey/white palette</td></tr>
+    <tr><td>Auth</td><td>Not started</td></tr>
+    <tr><td>Database</td><td>Not started — Supabase client wired but no project yet</td></tr>
+    <tr><td>Real-time</td><td>Not started</td></tr>
+    <tr><td>Backend logic</td><td>None — everything is mock data</td></tr>
+    <tr><td>Native build</td><td>None — runs only as web/Expo Go</td></tr>
+    <tr><td>Distribution</td><td>Not started</td></tr>
+  </tbody>
+</table>
+<p>The app <strong>looks</strong> real. Nothing is real yet.</p>
+
+<h2>Phase 1 — Foundation</h2>
+<p class="phase-meta">Week 1–2 · the unsexy plumbing. Without it, no other phase is possible.</p>
+
+<h3>Supabase project setup</h3>
+<ul class="checklist">
+  <li>Create a Supabase project at supabase.com (free tier)</li>
+  <li>Copy the project URL and anon key into <code>.env</code></li>
+  <li>Confirm the existing <code>lib/supabase.ts</code> client connects (write a tiny test query)</li>
+  <li>Configure Auth → Email Auth → restrict signup to email domains containing <code>nd.edu</code></li>
+</ul>
+
+<h3>Database schema</h3>
+<p>Design and migrate the core tables. Each should have RLS (row-level security) on from day one.</p>
+<ul class="checklist">
+  <li><code>profiles</code> — id (FK to auth.users), display_name, initials, year, major, dorm, avatar_url, bio, verified_at</li>
+  <li><code>gigs</code> — id, poster_id, title, description, category, payout_cents, location_label, lat, lon, posted_at, status, accepted_by, deadline_at</li>
+  <li><code>hangouts</code> — id, host_id, title, vibe, location_label, lat, lon, starts_at, max_people, description</li>
+  <li><code>hangout_attendees</code> — hangout_id, user_id, joined_at</li>
+  <li><code>conversations</code> — id, gig_id (nullable), hangout_id (nullable), created_at</li>
+  <li><code>conversation_members</code> — conversation_id, user_id, last_read_at</li>
+  <li><code>messages</code> — id, conversation_id, sender_id, body, sent_at</li>
+  <li><code>reports</code> — id, reporter_id, target_user_id, target_kind, target_id, reason, created_at</li>
+  <li>Write RLS policies: users can only read/write their own data; gigs and hangouts are publicly readable to verified students; messages only readable by conversation members</li>
+</ul>
+
+<h3>Auth flows</h3>
+<ul class="checklist">
+  <li><strong>Sign up</strong> screen with <code>.edu</code> email + password</li>
+  <li>Email verification — link sent on signup, opens app to confirm screen</li>
+  <li><strong>Sign in</strong> screen</li>
+  <li><strong>Forgot password</strong> flow</li>
+  <li><strong>Sign out</strong> action in settings</li>
+  <li>Session persistence (verify it survives app close)</li>
+  <li>Auth-gate the tabs: redirect to <code>/welcome</code> → <code>/sign-in</code> if no session</li>
+</ul>
+
+<h3>Profile creation</h3>
+<ul class="checklist">
+  <li>First-time profile setup screen after signup (name, year, major, optional dorm, optional photo)</li>
+  <li><strong>Profile</strong> tab — your own profile + edit</li>
+  <li>View other users' profiles (read-only)</li>
+  <li>Storage bucket <code>avatars</code> with policy: users can write their own avatar only</li>
+</ul>
+
+<div class="done-when"><strong>Phase 1 done when:</strong> a new student can sign up with their <code>.edu</code> email, verify it, set up a profile, sign out, sign back in, and see their profile data persisted.</div>
+
+<h2>Phase 2 — Gigs end-to-end</h2>
+<p class="phase-meta">Week 3–4 · the wedge. Get this fully working before touching hangouts.</p>
+
+<h3>Posting</h3>
+<ul class="checklist">
+  <li>Wire the <strong>Post a gig</strong> FAB on the Gigs tab to a real form</li>
+  <li>Form fields: title, description, category, payout, location, optional photo, optional deadline</li>
+  <li>Submit → insert into <code>gigs</code> table with <code>status = 'open'</code></li>
+  <li>Show "your post is live" confirmation, navigate back to feed</li>
+  <li>Validation: required fields, payout &gt; $0, basic word filter</li>
+</ul>
+
+<h3>Reading the feed</h3>
+<ul class="checklist">
+  <li>Replace the mock <code>MOCK_GIGS</code> array with a real Supabase query</li>
+  <li>Filter by category from the chips (server-side)</li>
+  <li>Pagination — load 20 at a time, fetch more on scroll</li>
+  <li>Realtime subscription on the <code>gigs</code> table → new posts appear live</li>
+  <li>Sort: newest first, with a toggle for "closest"</li>
+</ul>
+
+<h3>Gig detail screen</h3>
+<ul class="checklist">
+  <li>Tap a gig card → navigate to <code>/gig/[id]</code></li>
+  <li>Full description, photo, poster's profile snippet, payout, location, posted-time</li>
+  <li><strong>"I'll do it"</strong> button → creates a conversation, navigates to chat</li>
+  <li>If you're the poster: see list of applicants, "Accept" button</li>
+  <li>On accept: <code>status = 'accepted'</code>, hide gig from public feed</li>
+  <li>On completion: poster taps "Mark complete" → triggers review prompt</li>
+</ul>
+
+<h3>Reviews (lightweight)</h3>
+<ul class="checklist">
+  <li>After a gig is done, both parties leave a 1–5 star rating + 1-sentence review</li>
+  <li>Aggregate rating shown on user profiles ("4.8 ★ · 12 gigs")</li>
+  <li>Hide partial ratings until a user has 3+ reviews</li>
+</ul>
+
+<div class="done-when"><strong>Phase 2 done when:</strong> a student can post a gig, another can apply, they can chat to coordinate, mark it complete, and rate each other — without writing any code.</div>
+
+<h2 class="page-break">Phase 3 — Hangouts + real messaging</h2>
+<p class="phase-meta">Week 5–6 · the social layer.</p>
+
+<h3>Hangouts</h3>
+<ul class="checklist">
+  <li>Replace mock <code>MOCK_HANGOUTS</code> with <code>hangouts</code> table query</li>
+  <li><strong>Start a hangout</strong> FAB → form (title, vibe, location, when, max_people, description)</li>
+  <li><strong>I'm in</strong> button → insert into <code>hangout_attendees</code></li>
+  <li>Hangout detail screen with attendee list, description, location pin</li>
+  <li>Auto-create a group conversation linked to the hangout</li>
+  <li>Leave hangout button (removes from attendees + group chat)</li>
+  <li>Host can cancel hangout (sends a system message to the group)</li>
+</ul>
+
+<h3>Messaging (the real version)</h3>
+<ul class="checklist">
+  <li>Replace mock <code>CONVOS</code> with a real query joining conversations, members, latest messages</li>
+  <li>Show only conversations where you're a member (RLS handles this)</li>
+  <li>Inbox sorted by latest message timestamp</li>
+  <li>Unread count: messages where <code>sent_at &gt; my last_read_at</code></li>
+</ul>
+
+<h3>Chat thread (the real version)</h3>
+<ul class="checklist">
+  <li>Replace mock conversation lookup with a real query of <code>messages</code></li>
+  <li><strong>Realtime subscription</strong> so incoming messages append live</li>
+  <li>Send button: insert into <code>messages</code>, optimistically append, clear input</li>
+  <li>Update <code>last_read_at</code> when the user opens the thread</li>
+  <li>Show the gig/hangout context line as a real link to the source</li>
+</ul>
+
+<h3>Optional but nice</h3>
+<ul class="checklist">
+  <li>Typing indicator (Supabase presence)</li>
+  <li>Read receipts</li>
+  <li>Image attachments — upload to Supabase Storage</li>
+</ul>
+
+<div class="done-when"><strong>Phase 3 done when:</strong> two real students on two real phones can RSVP to the same hangout and see their messages appear live in the group chat.</div>
+
+<h2>Phase 4 — Map + native build</h2>
+<p class="phase-meta">Week 7 · escape the web prototype.</p>
+
+<h3>Real map data</h3>
+<ul class="checklist">
+  <li>Replace static <code>PINS</code> with a query of all open gigs and upcoming hangouts</li>
+  <li>Pin emoji chosen by category</li>
+  <li>Tap pin → popup with title and a "View" link to the detail screen</li>
+  <li>Filter chips on the map (Gigs / Hangouts / both)</li>
+  <li>"Center on me" button (requires location permission)</li>
+</ul>
+
+<h3>Native map (replace the iframe)</h3>
+<ul class="checklist">
+  <li>Install <code>react-native-maps</code></li>
+  <li>Render <code>MapView</code> on native, keep iframe on web</li>
+  <li>Custom markers using emoji as the marker label</li>
+  <li>Build a development client (<code>eas build --profile development</code>) — Expo Go can't load native modules</li>
+</ul>
+
+<h3>Location capture</h3>
+<ul class="checklist">
+  <li>When posting, allow tapping a map to set lat/lon (instead of typing a label)</li>
+  <li>Reverse-geocode the tapped point to a campus landmark name (use a hardcoded ND landmarks list for v1)</li>
+</ul>
+
+<div class="done-when"><strong>Phase 4 done when:</strong> the Map tab shows live data from your database with proper pins on iOS, Android, and web.</div>
+
+<h2>Phase 5 — Trust, safety, polish</h2>
+<p class="phase-meta">Week 8 part A.</p>
+
+<h3>Reporting & blocking</h3>
+<ul class="checklist">
+  <li>Long-press / "..." menu on any gig, hangout, message, or profile → "Report"</li>
+  <li>Insert into <code>reports</code>, optional reason text</li>
+  <li>Block user — adds to a <code>blocks</code> table; blocked users' content is filtered out everywhere</li>
+  <li>You get an email per new report; manual review for v1</li>
+</ul>
+
+<h3>Notifications</h3>
+<ul class="checklist">
+  <li>Set up Expo Notifications, store push tokens on <code>profiles</code></li>
+  <li>Trigger via Supabase Edge Functions on: new application, accepted application, new message, hangout join</li>
+  <li>In-app notification feed (last 50 events for you)</li>
+</ul>
+
+<h3>Settings screen</h3>
+<ul class="checklist">
+  <li>Sign out</li>
+  <li>Edit profile</li>
+  <li>Notification preferences (toggle each event type)</li>
+  <li>Privacy: "show me on the map" toggle</li>
+  <li>Delete account (cascades correctly)</li>
+</ul>
+
+<h3>Onboarding & permissions</h3>
+<ul class="checklist">
+  <li>First-launch tutorial overlay (3 quick screens)</li>
+  <li>Permission prompts at the right time (notifications when entering Messages, location when opening Map)</li>
+</ul>
+
+<h2>Phase 6 — Launch prep</h2>
+<p class="phase-meta">Week 8 part B.</p>
+
+<h3>Legal & store listings</h3>
+<ul class="checklist">
+  <li>Privacy policy (Termly boilerplate, then customize for student-data specifics)</li>
+  <li>Terms of service</li>
+  <li>Apple Developer account ($99/yr)</li>
+  <li>Google Play Console account ($25 one-time)</li>
+  <li>App Store screenshots (5–8 per device size)</li>
+  <li>App description, keywords, category</li>
+  <li>Production app icon (1024×1024)</li>
+  <li>Production splash screen</li>
+</ul>
+
+<h3>Builds & beta</h3>
+<ul class="checklist">
+  <li><code>eas build --profile production</code> for iOS and Android</li>
+  <li>TestFlight build distributed to ~20 ND students for closed beta</li>
+  <li>Iterate on feedback for 1–2 weeks</li>
+  <li>Submit to App Store and Play Store</li>
+</ul>
+
+<h3>Seeding & launch</h3>
+<ul class="checklist">
+  <li>Pre-seed 30+ gigs and hangouts before launch day</li>
+  <li>Notre Dame–specific marketing: dorm flyers, campus subreddit, GroupMe drops, freshman orientation table</li>
+  <li>Track day-1, day-7, day-30 retention from launch</li>
+</ul>
+
+<h2 class="page-break">Explicitly out of scope for v1</h2>
+<table>
+  <thead><tr><th style="width:35%">Feature</th><th>Why not yet</th></tr></thead>
+  <tbody>
+    <tr><td>In-app payments</td><td>Users settle via Venmo / cash. Stripe Connect is a 3-month project on its own.</td></tr>
+    <tr><td>Second campus</td><td>Wedge depends on density. Don't expand until ND has a strong base.</td></tr>
+    <tr><td>Background checks</td><td>Premature for a campus-only app with <code>.edu</code> verification.</td></tr>
+    <tr><td>Group hangouts &gt; 50 people</td><td>YAGNI. Cap at 20 for v1.</td></tr>
+    <tr><td>AI matchmaking / recommendations</td><td>Build the manual feed first. Personalization is a post-PMF problem.</td></tr>
+    <tr><td>Web dashboard for admins</td><td>Use the Supabase dashboard directly.</td></tr>
+  </tbody>
+</table>
+
+<h2>Critical risks to watch</h2>
+<ol>
+  <li><strong>Cold start on day 1</strong> — if the feed is empty when the first 50 students open the app, they bounce and don't come back. Pre-seeding is non-negotiable.</li>
+  <li><strong>.edu verification false positives</strong> — anyone with an <code>nd.edu</code> email includes alumni and faculty. Decide whether that's a feature or a bug before launch.</li>
+  <li><strong>Liability</strong> — students meeting up via your app to do gigs (especially "rides to the airport") creates real liability. A clear ToS disclaimer and an in-app safety guide are mandatory before launch.</li>
+  <li><strong>Trust collapse on a single bad actor</strong> — one scam or one harassment incident can poison the well on a small campus. Reporting + blocking must work on day 1, not day 30.</li>
+</ol>
+
+<h2>What to do this week</h2>
+<ol>
+  <li>Create the Supabase project</li>
+  <li>Build the schema with RLS</li>
+  <li>Wire up sign-up and sign-in screens against real auth</li>
+  <li>Replace the mock gigs feed with real database queries</li>
+  <li>Stop building new visual screens until users can actually log in.</li>
+</ol>
+
+<div class="footer-note">Generated for the quad app · Notre Dame · Summer 2026</div>
+
+</body>
+</html>

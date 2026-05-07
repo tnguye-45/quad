@@ -21,6 +21,7 @@ const MAPPING = {
   'briefcase.fill': 'work',
   'person.3.fill': 'groups',
   'map.fill': 'map',
+  'message.fill': 'chat-bubble',
   'plus': 'add',
   'mappin.and.ellipse': 'location-on',
   'clock.fill': 'schedule',

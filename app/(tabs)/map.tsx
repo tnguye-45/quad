@@ -32,8 +32,8 @@ const MAP_HTML = `<!DOCTYPE html>
 <html>
 <head>
 <meta name="viewport" content="initial-scale=1.0,width=device-width">
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+<link rel="stylesheet" href="/leaflet/leaflet.css"/>
+<script src="/leaflet/leaflet.js"></script>
 <style>
   html,body,#map{height:100%;margin:0;padding:0;background:#fafafa;font-family:system-ui,-apple-system,sans-serif}
   .emoji-pin{font-size:30px;text-align:center;line-height:1;filter:drop-shadow(0 3px 5px rgba(0,0,0,.3));cursor:pointer;transition:transform .15s ease}

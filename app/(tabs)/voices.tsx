@@ -1,139 +1,50 @@
-import { useState } from 'react';
+import { router } from 'expo-router';
+import { useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
+import { NamePlaque } from '@/components/logo';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-
-type Topic = 'Dining' | 'Dorm' | 'Class' | 'Campus' | 'Sports' | 'Random';
-
-type Voice = {
-  id: string;
-  body: string;
-  topic: Topic;
-  postedAgo: string;
-  votes: number;
-  comments: number;
-};
+import { usePosts, VOICE_TOPIC_EMOJI, type Voice } from '@/lib/posts-store';
 
 const FILTERS = ['Hot', 'New', 'Today'] as const;
-
-const MOCK_VOICES: Voice[] = [
-  {
-    id: '1',
-    body: 'south dining hall is straight up unhinged today. why is the line wrapping outside.',
-    topic: 'Dining',
-    postedAgo: '12m',
-    votes: 142,
-    comments: 23,
-  },
-  {
-    id: '2',
-    body: "to whoever left their hydroflask in DeBartolo 138, i'll bring it tomorrow at 9am. don't leak my information",
-    topic: 'Class',
-    postedAgo: '34m',
-    votes: 89,
-    comments: 5,
-  },
-  {
-    id: '3',
-    body: 'petition to make the leprechaun mascot scream less during football games',
-    topic: 'Sports',
-    postedAgo: '1h',
-    votes: -12,
-    comments: 47,
-  },
-  {
-    id: '4',
-    body: 'got asked out at the grotto today and i genuinely do not know how to feel',
-    topic: 'Random',
-    postedAgo: '2h',
-    votes: 318,
-    comments: 56,
-  },
-  {
-    id: '5',
-    body: 'Hesburgh 24-hour room is the realest place on campus at 3am. iykyk',
-    topic: 'Class',
-    postedAgo: '3h',
-    votes: 204,
-    comments: 12,
-  },
-  {
-    id: '6',
-    body: 'why does ND charge $9 for chicken tenders in the basket. it is gluttony pricing',
-    topic: 'Dining',
-    postedAgo: '4h',
-    votes: 76,
-    comments: 8,
-  },
-  {
-    id: '7',
-    body: 'first time at midnight mass at the basilica and wow. cried a little not gonna lie',
-    topic: 'Campus',
-    postedAgo: '5h',
-    votes: 421,
-    comments: 19,
-  },
-  {
-    id: '8',
-    body: 'if i see one more person ride a OneWheel through the quad during peak class change i will scream',
-    topic: 'Campus',
-    postedAgo: '6h',
-    votes: 167,
-    comments: 32,
-  },
-  {
-    id: '9',
-    body: "Dillon Hall is freezing again and it's NOVEMBER. fix the heat",
-    topic: 'Dorm',
-    postedAgo: '7h',
-    votes: 95,
-    comments: 14,
-  },
-  {
-    id: '10',
-    body: 'dome looked unreal tonight 😍',
-    topic: 'Campus',
-    postedAgo: '8h',
-    votes: 53,
-    comments: 3,
-  },
-  {
-    id: '11',
-    body: 'unpopular opinion: the food at NDH > SDH and i will die on this hill',
-    topic: 'Dining',
-    postedAgo: '11h',
-    votes: -4,
-    comments: 89,
-  },
-];
-
-const TOPIC_EMOJI: Record<Topic, string> = {
-  Dining: '🍕',
-  Dorm: '🛏️',
-  Class: '📚',
-  Campus: '🏛️',
-  Sports: '🏈',
-  Random: '🎲',
-};
 
 export default function VoicesScreen() {
   const c = Colors[useColorScheme() ?? 'light'];
   const [filter, setFilter] = useState<(typeof FILTERS)[number]>('Hot');
+  const { voices, voteVoice, loading, hydrated } = usePosts();
+  const showLoading = !hydrated && loading && voices.length === 0;
+
+  const ordered = useMemo(() => {
+    const list = [...voices];
+    if (filter === 'New') {
+      list.sort((a, b) => b.postedAt - a.postedAt);
+    } else if (filter === 'Today') {
+      const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+      return list.filter((v) => v.postedAt >= cutoff).sort((a, b) => b.votes - a.votes);
+    } else {
+      list.sort((a, b) => b.votes - a.votes);
+    }
+    return list;
+  }, [voices, filter]);
 
   return (
     <ThemedView style={[styles.screen, { backgroundColor: c.background }]}>
       <View style={styles.header}>
-        <ThemedText type="title" style={styles.brand}>
-          Voices
-        </ThemedText>
+        <View style={styles.brandRow}>
+          <NamePlaque size="sm" />
+          <View style={[styles.divider, { backgroundColor: c.border }]} />
+          <ThemedText type="defaultSemiBold" style={[styles.section, { color: c.textSecondary }]}>
+            Voices
+          </ThemedText>
+        </View>
         <View style={styles.subRow}>
           <View style={[styles.anonDot, { backgroundColor: c.tint }]} />
           <ThemedText style={[styles.subtle, { color: c.textSecondary }]}>
-            anonymous · 247 students online
+            anonymous by default · 247 students online
           </ThemedText>
         </View>
       </View>
@@ -165,9 +76,19 @@ export default function VoicesScreen() {
       </View>
 
       <ScrollView contentContainerStyle={styles.list} showsVerticalScrollIndicator={false}>
-        {MOCK_VOICES.map((v) => (
-          <VoiceCard key={v.id} voice={v} c={c} />
-        ))}
+        {showLoading ? (
+          <ThemedText style={[styles.subtle, { textAlign: 'center', marginTop: 40, color: c.textSecondary }]}>
+            Loading voices…
+          </ThemedText>
+        ) : ordered.length === 0 ? (
+          <ThemedText style={[styles.subtle, { textAlign: 'center', marginTop: 40, color: c.textSecondary }]}>
+            No voices yet — be the first to speak.
+          </ThemedText>
+        ) : (
+          ordered.map((v) => (
+            <VoiceCard key={v.id} voice={v} c={c} onVote={(d) => voteVoice(v.id, d)} />
+          ))
+        )}
         <View style={{ height: 96 }} />
       </ScrollView>
 
@@ -176,7 +97,7 @@ export default function VoicesScreen() {
           styles.fab,
           { backgroundColor: c.tint, opacity: pressed ? 0.85 : 1 },
         ]}
-        onPress={() => {}}>
+        onPress={() => router.push('/post-voice')}>
         <IconSymbol name="plus" size={18} color={c.background} />
         <ThemedText style={[styles.fabText, { color: c.background }]}>Speak</ThemedText>
       </Pressable>
@@ -184,13 +105,36 @@ export default function VoicesScreen() {
   );
 }
 
-function VoiceCard({ voice, c }: { voice: Voice; c: (typeof Colors)['light'] }) {
+function VoiceCard({
+  voice,
+  c,
+  onVote,
+}: {
+  voice: Voice;
+  c: (typeof Colors)['light'];
+  onVote: (delta: 1 | -1 | 0) => void;
+}) {
   const [vote, setVote] = useState<0 | 1 | -1>(0);
   const score = voice.votes + vote;
   const positive = score >= 0;
 
   const press = (dir: 1 | -1) => () => {
-    setVote(vote === dir ? 0 : dir);
+    const next = vote === dir ? 0 : dir;
+    // Apply only the delta between previous and next so the store stays consistent.
+    const delta = (next - vote) as 1 | -1 | 0 | 2 | -2;
+    if (delta !== 0) {
+      // Two-step vote (e.g. up -> down) needs two ticks.
+      if (delta === 2) {
+        onVote(1);
+        onVote(1);
+      } else if (delta === -2) {
+        onVote(-1);
+        onVote(-1);
+      } else {
+        onVote(delta as 1 | -1);
+      }
+    }
+    setVote(next);
   };
 
   return (
@@ -201,17 +145,29 @@ function VoiceCard({ voice, c }: { voice: Voice; c: (typeof Colors)['light'] }) 
       ]}>
       <View style={styles.cardHead}>
         <View style={[styles.topicTag, { backgroundColor: c.subtle }]}>
-          <ThemedText style={styles.topicEmoji}>{TOPIC_EMOJI[voice.topic]}</ThemedText>
+          <ThemedText style={styles.topicEmoji}>{VOICE_TOPIC_EMOJI[voice.topic]}</ThemedText>
           <ThemedText style={[styles.topicText, { color: c.textSecondary }]}>
             {voice.topic}
           </ThemedText>
         </View>
         <ThemedText style={[styles.timeText, { color: c.textSecondary }]}>
-          {voice.postedAgo}
+          {voice.postedAgo || timeAgo(voice.postedAt)}
         </ThemedText>
       </View>
 
       <ThemedText style={[styles.body, { color: c.text }]}>{voice.body}</ThemedText>
+
+      <View style={styles.authorRow}>
+        <View
+          style={[
+            styles.authorBadge,
+            { backgroundColor: c.subtle, borderColor: c.border },
+          ]}>
+          <ThemedText style={[styles.authorBadgeText, { color: c.textSecondary }]}>
+            {voice.anonymous || !voice.posterName ? 'anonymous' : voice.posterName}
+          </ThemedText>
+        </View>
+      </View>
 
       <View style={[styles.cardFoot, { borderTopColor: c.border }]}>
         <View
@@ -234,7 +190,13 @@ function VoiceCard({ voice, c }: { voice: Voice; c: (typeof Colors)['light'] }) 
               styles.voteCount,
               {
                 color:
-                  vote === 1 ? '#16a34a' : vote === -1 ? '#dc2626' : positive ? c.text : '#dc2626',
+                  vote === 1
+                    ? '#16a34a'
+                    : vote === -1
+                      ? '#dc2626'
+                      : positive
+                        ? c.text
+                        : '#dc2626',
               },
             ]}>
             {score > 0 ? `+${score}` : score}
@@ -251,15 +213,26 @@ function VoiceCard({ voice, c }: { voice: Voice; c: (typeof Colors)['light'] }) 
           </Pressable>
         </View>
 
-        <Pressable style={styles.commentBtn} hitSlop={6}>
+        <View style={styles.commentBtn}>
           <IconSymbol name="bubble.right" size={15} color={c.textSecondary} />
           <ThemedText style={[styles.commentCount, { color: c.textSecondary }]}>
             {voice.comments}
           </ThemedText>
-        </Pressable>
+        </View>
       </View>
     </View>
   );
+}
+
+function timeAgo(ts: number): string {
+  const diffSec = Math.max(0, Math.floor((Date.now() - ts) / 1000));
+  if (diffSec < 60) return 'just now';
+  const min = Math.floor(diffSec / 60);
+  if (min < 60) return `${min}m`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h`;
+  const day = Math.floor(hr / 24);
+  return `${day}d`;
 }
 
 const styles = StyleSheet.create({
@@ -271,15 +244,25 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingBottom: 12,
   },
-  brand: {
-    fontSize: 28,
-    letterSpacing: -0.5,
+  brandRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  divider: {
+    width: 1,
+    height: 16,
+  },
+  section: {
+    fontSize: 14,
+    letterSpacing: 0.3,
+    textTransform: 'uppercase',
   },
   subRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    marginTop: 4,
+    marginTop: 6,
   },
   anonDot: {
     width: 6,
@@ -343,6 +326,20 @@ const styles = StyleSheet.create({
   body: {
     fontSize: 15,
     lineHeight: 21,
+  },
+  authorRow: {
+    flexDirection: 'row',
+  },
+  authorBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 999,
+    borderWidth: 1,
+  },
+  authorBadgeText: {
+    fontSize: 11,
+    fontWeight: '500',
+    letterSpacing: 0.2,
   },
   cardFoot: {
     flexDirection: 'row',

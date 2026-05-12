@@ -21,7 +21,6 @@ export function CampusMap() {
         },
       ]}>
       {Platform.OS === 'web' ? (
-        // @ts-expect-error iframe is a web-only DOM element rendered by react-native-web
         <iframe
           src={OSM_EMBED}
           title="University of Notre Dame campus map"
@@ -46,7 +45,7 @@ export function CampusMap() {
 const styles = StyleSheet.create({
   wrap: {
     height: 180,
-    borderRadius: 16,
+    borderRadius: 4,
     borderWidth: 1,
     overflow: 'hidden',
     marginHorizontal: 20,

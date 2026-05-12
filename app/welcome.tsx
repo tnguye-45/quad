@@ -6,6 +6,7 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { useAuth } from '@/lib/auth-context';
 
 const FEATURES = [
   {
@@ -32,6 +33,7 @@ const FEATURES = [
 
 export default function WelcomeScreen() {
   const c = Colors[useColorScheme() ?? 'light'];
+  const { enableDevAuth } = useAuth();
 
   return (
     <ThemedView style={[styles.screen, { backgroundColor: c.background }]}>
@@ -71,12 +73,27 @@ export default function WelcomeScreen() {
             styles.cta,
             { backgroundColor: c.tint, opacity: pressed ? 0.85 : 1 },
           ]}
-          onPress={() => router.replace('/(tabs)')}>
-          <ThemedText style={[styles.ctaText, { color: c.background }]}>Get started</ThemedText>
+          onPress={() => router.push('/(auth)/sign-up')}>
+          <ThemedText style={[styles.ctaText, { color: c.background }]}>
+            Sign up with @nd.edu
+          </ThemedText>
         </Pressable>
-        <ThemedText style={[styles.ctaSubtle, { color: c.textSecondary }]}>
-          Free · no account needed yet
-        </ThemedText>
+        <Pressable onPress={() => router.push('/(auth)/sign-in')}>
+          <ThemedText style={[styles.ctaSubtle, { color: c.textSecondary }]}>
+            Already have an account?{' '}
+            <ThemedText type="defaultSemiBold" style={{ color: c.tint }}>
+              Sign in
+            </ThemedText>
+          </ThemedText>
+        </Pressable>
+
+        {__DEV__ ? (
+          <Pressable onPress={enableDevAuth} style={styles.devButton}>
+            <ThemedText style={[styles.devText, { color: c.textSecondary }]}>
+              Dev: enter as admin (skip auth)
+            </ThemedText>
+          </Pressable>
+        ) : null}
       </View>
     </ThemedView>
   );
@@ -105,9 +122,9 @@ const styles = StyleSheet.create({
   },
   campusPill: {
     marginTop: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 2,
     borderWidth: 1,
   },
   campusPillText: {
@@ -149,13 +166,8 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: 420,
     paddingVertical: 16,
-    borderRadius: 14,
+    borderRadius: 4,
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOpacity: 0.12,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 4,
   },
   ctaText: {
     fontSize: 16,
@@ -163,5 +175,19 @@ const styles = StyleSheet.create({
   },
   ctaSubtle: {
     fontSize: 12,
+  },
+  devButton: {
+    marginTop: 14,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 2,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: '#9ca3af',
+  },
+  devText: {
+    fontSize: 11,
+    letterSpacing: 0.3,
+    textTransform: 'uppercase',
   },
 });

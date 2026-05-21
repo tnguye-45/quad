@@ -69,6 +69,10 @@ export default function MessagesScreen() {
         </ThemedText>
       </View>
 
+      {useReal && error ? (
+        <ThemedText style={[styles.error, { color: '#dc2626' }]}>{error}</ThemedText>
+      ) : null}
+
       {useReal && loading && items.length === 0 ? (
         <View style={styles.emptyBlock}>
           <ThemedText style={[styles.subtle, { color: c.textSecondary }]}>
@@ -135,9 +139,6 @@ export default function MessagesScreen() {
               </Pressable>
             );
           })}
-          {useReal && error ? (
-            <ThemedText style={[styles.error, { color: '#dc2626' }]}>{error}</ThemedText>
-          ) : null}
           <View style={{ height: 40 }} />
         </ScrollView>
       )}

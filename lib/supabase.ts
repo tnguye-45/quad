@@ -13,6 +13,21 @@ if (!supabaseUrl || !supabaseAnonKey) {
   );
 }
 
+// Catch the placeholder values from .env.example before they hit Supabase and
+// produce a cryptic 401. The anon key is always a long JWT — the placeholder
+// is the literal string left behind when the dev hasn't pasted their key yet.
+if (
+  supabaseAnonKey === 'PASTE_YOUR_ANON_KEY_HERE' ||
+  supabaseAnonKey === 'your-anon-key-here' ||
+  supabaseAnonKey.length < 40
+) {
+  throw new Error(
+    'EXPO_PUBLIC_SUPABASE_ANON_KEY in .env is still a placeholder. ' +
+      'Get the real key from Supabase Dashboard → Project Settings → API → "anon public", ' +
+      'paste it into .env, and restart the dev server.',
+  );
+}
+
 // Storage adapter that's safe under SSR/SSG (Expo's static web output renders
 // routes in Node, where `window` doesn't exist).
 const noopStorage = {

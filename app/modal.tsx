@@ -371,7 +371,7 @@ const styles = StyleSheet.create({
     gap: 5,
     paddingHorizontal: 8,
     paddingVertical: 3,
-    borderRadius: 999,
+    borderRadius: 2,
   },
   voiceTopicEmoji: { fontSize: 11 },
   voiceTopicText: {
@@ -385,7 +385,7 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
     paddingHorizontal: 8,
     paddingVertical: 2,
-    borderRadius: 999,
+    borderRadius: 2,
     borderWidth: 1,
     marginTop: 2,
   },

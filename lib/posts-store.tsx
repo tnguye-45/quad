@@ -566,14 +566,16 @@ export function PostsProvider({ children }: { children: ReactNode }) {
       );
       return;
     }
-    const { error: rsvpErr } = await supabase
-      .from('hangout_attendees')
-      .insert({ hangout_id: id, user_id: session!.user.id });
-    if (rsvpErr && !rsvpErr.message.includes('duplicate')) {
+    // join_hangout RPC handles attendee insert + group conversation membership
+    // atomically. Idempotent via on-conflict in SQL.
+    const { error: rsvpErr } = await supabase.rpc('join_hangout', {
+      p_hangout_id: id,
+    });
+    if (rsvpErr) {
       console.warn('[posts-store] rsvp failed:', rsvpErr.message);
+      setError(rsvpErr.message);
       return;
     }
-    // Optimistic bump; the count is re-derived on next fetch.
     setHangouts((cur) =>
       cur.map((h) => (h.id === id ? { ...h, going: h.going + 1 } : h)),
     );

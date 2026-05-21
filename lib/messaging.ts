@@ -382,74 +382,45 @@ export function useThread(conversationId: string | undefined): {
   );
 }
 
-// Find an existing conversation between `me` and `targetUserId` tied to this
-// gig, or create one. Returns the conversation id. Used by the gig detail
-// "Message poster" button.
+// Start (or reuse) a 1:1 conversation with the gig's poster. Backed by the
+// `start_gig_conversation` SECURITY DEFINER RPC, which is the only way to
+// insert a membership row for someone other than yourself.
 export async function findOrCreateGigConversation(args: {
   meId: string;
   gigId: string;
   posterId: string;
 }): Promise<string | null> {
   if (args.meId === args.posterId) return null;
-  // First, see if I'm already in a conversation for this gig.
-  const { data: mine, error: e1 } = await supabase
-    .from('conversation_members')
-    .select('conversation_id, conversation:conversations(id, gig_id)')
-    .eq('user_id', args.meId);
-  if (e1) {
-    console.warn('[messaging] findOrCreateGigConversation lookup failed:', e1.message);
+  const { data, error } = await supabase.rpc('start_gig_conversation', {
+    p_gig_id: args.gigId,
+  });
+  if (error) {
+    console.warn('[messaging] start_gig_conversation failed:', error.message);
     return null;
   }
-  const match = (mine ?? []).find(
-    (m) => (m.conversation as unknown as { gig_id: string | null } | null)?.gig_id === args.gigId,
-  );
-  if (match) return match.conversation_id;
-
-  // Otherwise create one. The poster_id needs to exist as a profile (the
-  // trigger guarantees this for any real user).
-  const { data: convRow, error: e2 } = await supabase
-    .from('conversations')
-    .insert({ gig_id: args.gigId })
-    .select('id')
-    .single();
-  if (e2 || !convRow) {
-    console.warn('[messaging] create conversation failed:', e2?.message);
-    return null;
-  }
-  // Add both members. RLS allows authenticated users to insert their own row
-  // and to insert other rows so long as they're authenticated; the policy in
-  // 0002 has `with check (user_id = auth.uid())`, which would block adding the
-  // poster. We instead rely on the poster being added when *they* open the
-  // conversation. For now, add only ourselves; the poster sees it via their
-  // own future check, OR — better — we add a tiny RPC.
-  //
-  // For Phase 2, we add only the viewer here. The poster gets added on first
-  // open of the conversation if missing. (See join helper below.)
-  const { error: e3 } = await supabase
-    .from('conversation_members')
-    .insert({ conversation_id: convRow.id, user_id: args.meId });
-  if (e3) {
-    console.warn('[messaging] add self failed:', e3.message);
-  }
-  return convRow.id;
+  return (data as string) ?? null;
 }
 
-// Add the current user as a conversation member if they're not already. Useful
-// because the gig detail "Message poster" path can only add the viewer; the
-// poster is added the first time they open the thread.
-export async function ensureSelfMembership(args: {
-  conversationId: string;
-  meId: string;
-}): Promise<void> {
-  const { data: existing } = await supabase
-    .from('conversation_members')
-    .select('conversation_id')
-    .eq('conversation_id', args.conversationId)
-    .eq('user_id', args.meId)
-    .maybeSingle();
-  if (existing) return;
-  await supabase
-    .from('conversation_members')
-    .insert({ conversation_id: args.conversationId, user_id: args.meId })
-    .then(() => undefined, () => undefined);
+// RSVP to a hangout and join its group conversation in one atomic call.
+// Returns the conversation id on success, or null on error.
+export async function joinHangout(hangoutId: string): Promise<string | null> {
+  const { data, error } = await supabase.rpc('join_hangout', {
+    p_hangout_id: hangoutId,
+  });
+  if (error) {
+    console.warn('[messaging] join_hangout failed:', error.message);
+    return null;
+  }
+  return (data as string) ?? null;
+}
+
+export async function leaveHangout(hangoutId: string): Promise<boolean> {
+  const { error } = await supabase.rpc('leave_hangout', {
+    p_hangout_id: hangoutId,
+  });
+  if (error) {
+    console.warn('[messaging] leave_hangout failed:', error.message);
+    return false;
+  }
+  return true;
 }

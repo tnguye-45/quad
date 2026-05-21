@@ -15,7 +15,7 @@ import { ThemedView } from '@/components/themed-view';
 import { Colors, Fonts } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useAuth } from '@/lib/auth-context';
-import { ensureSelfMembership, useThread } from '@/lib/messaging';
+import { useThread } from '@/lib/messaging';
 
 type Msg = { from: 'me' | 'them'; text: string; time?: string };
 
@@ -171,14 +171,6 @@ function RealChat({
   );
   const [draft, setDraft] = useState('');
   const scrollRef = useRef<ScrollView | null>(null);
-
-  // If we open a freshly-created conversation, the poster may not yet be a
-  // member — but if we (the viewer) are missing too, this no-ops safely.
-  useEffect(() => {
-    if (conversationId) {
-      ensureSelfMembership({ conversationId, meId: userId });
-    }
-  }, [conversationId, userId]);
 
   useEffect(() => {
     const t = setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 50);
@@ -445,10 +437,10 @@ const styles = StyleSheet.create({
     position: 'absolute',
     bottom: -1,
     right: -1,
-    width: 11,
-    height: 11,
-    borderRadius: 5.5,
-    backgroundColor: '#22c55e',
+    width: 9,
+    height: 9,
+    borderRadius: 4.5,
+    backgroundColor: '#111827',
     borderWidth: 2,
   },
   headerName: {
@@ -480,7 +472,7 @@ const styles = StyleSheet.create({
     maxWidth: '78%',
     paddingHorizontal: 14,
     paddingVertical: 10,
-    borderRadius: 18,
+    borderRadius: 12,
   },
   bubbleText: {
     fontSize: 15,

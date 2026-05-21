@@ -10,22 +10,22 @@ import { useAuth } from '@/lib/auth-context';
 
 const FEATURES = [
   {
-    emoji: '💼',
+    marker: '01',
     title: 'Find quick gigs',
     body: 'Tutoring, moving help, rides to the airport, dog walks — earn cash from people on your campus.',
   },
   {
-    emoji: '👥',
+    marker: '02',
     title: 'Join hangouts',
     body: 'Study sessions, pickup basketball, dining hall meetups. Find your people for the things you already do.',
   },
   {
-    emoji: '🗺️',
+    marker: '03',
     title: 'See it on a map',
     body: "Everything's pinned to where it's actually happening. Walking distance only — no rideshares to nowhere.",
   },
   {
-    emoji: '🎓',
+    marker: '04',
     title: 'Students only',
     body: '.edu email required. No randos, no scams — just verified students from your school.',
   },
@@ -53,7 +53,9 @@ export default function WelcomeScreen() {
         <View style={styles.featureList}>
           {FEATURES.map((f) => (
             <View key={f.title} style={styles.feature}>
-              <ThemedText style={styles.featureEmoji}>{f.emoji}</ThemedText>
+              <ThemedText style={[styles.featureMarker, { color: c.textSecondary }]}>
+                {f.marker}
+              </ThemedText>
               <View style={styles.featureText}>
                 <ThemedText type="defaultSemiBold" style={styles.featureTitle}>
                   {f.title}
@@ -140,11 +142,13 @@ const styles = StyleSheet.create({
     gap: 16,
     alignItems: 'flex-start',
   },
-  featureEmoji: {
-    fontSize: 28,
-    lineHeight: 32,
-    width: 36,
-    textAlign: 'center',
+  featureMarker: {
+    fontSize: 11,
+    lineHeight: 18,
+    width: 28,
+    fontWeight: '500',
+    letterSpacing: 0.5,
+    paddingTop: 3,
   },
   featureText: {
     flex: 1,

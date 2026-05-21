@@ -10,29 +10,27 @@ One-time steps to point the app at a real backend. Takes ~10 minutes.
 
 ## 2. Run the migrations
 
-In the Supabase dashboard:
+**Fastest path:** open [migrations/_bundle.sql](migrations/_bundle.sql), copy the whole file, paste into Supabase dashboard → **SQL Editor → New query → Run**. That single paste applies 0001 through 0007 in order. Should see "Success. No rows returned."
+
+If you'd rather paste them individually (same end result):
 
 1. **SQL Editor** → **New query**
-2. Open [migrations/0001_schema.sql](migrations/0001_schema.sql) in your editor, copy the entire file, paste into the SQL Editor, click **Run**. Should see "Success. No rows returned."
+2. Open [migrations/0001_schema.sql](migrations/0001_schema.sql), copy, paste, **Run**.
 3. Repeat with each subsequent migration **in order**:
    - [migrations/0002_rls.sql](migrations/0002_rls.sql) — Row-Level Security policies
    - [migrations/0003_triggers.sql](migrations/0003_triggers.sql) — auto-create profile + `updated_at` trigger
    - [migrations/0004_profile_links.sql](migrations/0004_profile_links.sql) — `profiles.links` jsonb column
    - [migrations/0005_voices.sql](migrations/0005_voices.sql) — `voices` + `voice_votes` tables (anonymous opinion feed)
    - [migrations/0006_app_alignment.sql](migrations/0006_app_alignment.sql) — adds `anonymous` to gigs/hangouts, `when_label` to hangouts, broadens gig category check to match the app's enum
+   - [migrations/0007_conversations_and_realtime.sql](migrations/0007_conversations_and_realtime.sql) — `start_gig_conversation` / `join_hangout` / `leave_hangout` RPCs that bypass the conversation_members "self-only" RLS so a thread can have both participants. Also adds the realtime publication entries.
 
 Run them in order — later migrations reference tables and columns from earlier ones.
 
 To verify: in the SQL Editor, run `select tablename from pg_tables where schemaname = 'public';` — you should see 10 tables (profiles, gigs, hangouts, hangout_attendees, conversations, conversation_members, messages, reports, voices, voice_votes).
 
-### 2b. Enable Realtime
+### 2b. Realtime is wired by SQL
 
-The app subscribes to live inserts for new posts and messages. In **Project Settings → Replication**, toggle the following tables to be part of the `supabase_realtime` publication:
-
-- `gigs`
-- `hangouts`
-- `voices`
-- `messages`
+The previous version of this doc asked you to toggle the realtime publication in the dashboard. Migration 0007 does this in SQL (`alter publication supabase_realtime add table …`), so no manual toggling is required. If you're on a fresh project the migration is idempotent — re-running it after dashboard-side changes is safe.
 
 ## 3. Configure auth
 
@@ -61,7 +59,17 @@ In the Supabase dashboard:
 
 4. Restart `npm run start` so Expo picks up the new env
 
-## 5. Smoke test
+## 5. Verify the backend from the command line
+
+Once `.env` has the real anon key and the migrations are run, sanity-check the connection without launching the app:
+
+```
+npm run verify-supabase
+```
+
+The script checks that the URL + key are real, hits `/auth/v1/settings`, confirms each of the 10 expected tables is present, and verifies that anon writes are blocked by RLS. Any failure prints what's missing.
+
+## 6. Smoke test in the app
 
 In the app:
 

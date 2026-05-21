@@ -44,7 +44,7 @@ export default function VoicesScreen() {
         <View style={styles.subRow}>
           <View style={[styles.anonDot, { backgroundColor: c.tint }]} />
           <ThemedText style={[styles.subtle, { color: c.textSecondary }]}>
-            anonymous by default · 247 students online
+            anonymous by default · {voices.length} {voices.length === 1 ? 'voice' : 'voices'}
           </ThemedText>
         </View>
       </View>
@@ -115,8 +115,9 @@ function VoiceCard({
   onVote: (delta: 1 | -1 | 0) => void;
 }) {
   const [vote, setVote] = useState<0 | 1 | -1>(0);
-  const score = voice.votes + vote;
-  const positive = score >= 0;
+  // voice.votes is already optimistically updated by voteVoice in the store —
+  // don't add `vote` to it or the score double-counts on tap.
+  const score = voice.votes;
 
   const press = (dir: 1 | -1) => () => {
     const next = vote === dir ? 0 : dir;
@@ -182,22 +183,13 @@ function VoiceCard({
             <IconSymbol
               name="chevron.up"
               size={18}
-              color={vote === 1 ? '#16a34a' : c.textSecondary}
+              color={vote === 1 ? c.text : c.textSecondary}
             />
           </Pressable>
           <ThemedText
             style={[
               styles.voteCount,
-              {
-                color:
-                  vote === 1
-                    ? '#16a34a'
-                    : vote === -1
-                      ? '#dc2626'
-                      : positive
-                        ? c.text
-                        : '#dc2626',
-              },
+              { color: vote !== 0 ? c.text : c.textSecondary },
             ]}>
             {score > 0 ? `+${score}` : score}
           </ThemedText>
@@ -208,7 +200,7 @@ function VoiceCard({
             <IconSymbol
               name="chevron.down"
               size={18}
-              color={vote === -1 ? '#dc2626' : c.textSecondary}
+              color={vote === -1 ? c.text : c.textSecondary}
             />
           </Pressable>
         </View>
@@ -280,8 +272,8 @@ const styles = StyleSheet.create({
   },
   filterPill: {
     paddingHorizontal: 14,
-    paddingVertical: 7,
-    borderRadius: 999,
+    paddingVertical: 8,
+    borderRadius: 4,
     borderWidth: 1,
   },
   filterPillText: {
@@ -293,9 +285,9 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   card: {
-    borderRadius: 14,
+    borderRadius: 4,
     borderWidth: 1,
-    padding: 14,
+    padding: 16,
     gap: 10,
   },
   cardHead: {
@@ -307,9 +299,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 2,
   },
   topicEmoji: {
     fontSize: 12,
@@ -333,7 +325,7 @@ const styles = StyleSheet.create({
   authorBadge: {
     paddingHorizontal: 8,
     paddingVertical: 3,
-    borderRadius: 999,
+    borderRadius: 2,
     borderWidth: 1,
   },
   authorBadgeText: {
@@ -352,7 +344,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     borderWidth: 1,
-    borderRadius: 999,
+    borderRadius: 4,
     paddingHorizontal: 4,
     gap: 2,
   },
@@ -388,10 +380,10 @@ const styles = StyleSheet.create({
     paddingVertical: 13,
     borderRadius: 999,
     shadowColor: '#000',
-    shadowOpacity: 0.18,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 6,
+    shadowOpacity: 0.12,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 4,
   },
   fabText: {
     fontWeight: '600',

@@ -30,7 +30,7 @@ export default function GigsScreen() {
         <View style={styles.brandBlock}>
           <NamePlaque size="md" />
           <ThemedText style={[styles.subtle, { color: c.textSecondary }]}>
-            University of Notre Dame · 142 online
+            University of Notre Dame · {gigs.length} open {gigs.length === 1 ? 'gig' : 'gigs'}
           </ThemedText>
         </View>
         <Pressable
@@ -296,10 +296,10 @@ const styles = StyleSheet.create({
     paddingVertical: 13,
     borderRadius: 999,
     shadowColor: '#000',
-    shadowOpacity: 0.15,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 6,
+    shadowOpacity: 0.12,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 4,
   },
   fabText: {
     fontWeight: '600',

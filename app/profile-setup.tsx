@@ -15,6 +15,7 @@ import { ThemedView } from '@/components/themed-view';
 import { Colors, Fonts } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useAuth, type ProfileLink } from '@/lib/auth-context';
+import { detectPlatform, PLATFORMS, type Platform as LinkPlatform } from '@/lib/profile-links';
 import { supabase } from '@/lib/supabase';
 
 const YEARS = [1, 2, 3, 4, 5] as const;
@@ -68,13 +69,37 @@ export default function ProfileSetupScreen() {
     setLinks((cur) => cur.map((l, idx) => (idx === i ? { ...l, label } : l)));
   }
   function setLinkUrl(i: number, url: string) {
-    setLinks((cur) => cur.map((l, idx) => (idx === i ? { ...l, url } : l)));
+    setLinks((cur) =>
+      cur.map((l, idx) => {
+        if (idx !== i) return l;
+        // If the user pastes a URL for a known platform and the label is
+        // either empty or still the default placeholder, fill it in.
+        const detected = detectPlatform(url);
+        const labelIsAuto = !l.label || PLATFORMS.some((p) => p.label === l.label);
+        return {
+          ...l,
+          url,
+          label: detected && labelIsAuto ? detected.label : l.label,
+        };
+      }),
+    );
   }
-  function addLink() {
+  function addPlatformLink(platform: LinkPlatform) {
+    setLinks((cur) => [...cur, { label: platform.label, url: '' }]);
+  }
+  function addCustomLink() {
     setLinks((cur) => [...cur, { label: '', url: '' }]);
   }
   function removeLink(i: number) {
     setLinks((cur) => cur.filter((_, idx) => idx !== i));
+  }
+
+  // Surfaces a platform's placeholder so the URL hint matches what was added.
+  function placeholderForRow(row: ProfileLink): string {
+    const fromUrl = detectPlatform(row.url);
+    if (fromUrl) return fromUrl.placeholder;
+    const labelMatch = PLATFORMS.find((p) => p.label === row.label);
+    return labelMatch?.placeholder ?? 'https://…';
   }
 
   async function handleSave() {
@@ -218,21 +243,58 @@ export default function ProfileSetupScreen() {
             </View>
 
             <View style={styles.fieldGroup}>
-              <View style={styles.linksHeader}>
-                <ThemedText style={[styles.fieldLabel, { color: c.textSecondary }]}>
-                  Links
-                </ThemedText>
-                <Pressable onPress={addLink} hitSlop={8}>
-                  <ThemedText type="defaultSemiBold" style={[styles.addLink, { color: c.tint }]}>
-                    + Add link
+              <ThemedText style={[styles.fieldLabel, { color: c.textSecondary }]}>
+                Social & professional accounts
+              </ThemedText>
+              <ThemedText style={[styles.emptyHint, { color: c.textSecondary }]}>
+                Tap a platform to add it. Other students will see these on your profile.
+              </ThemedText>
+
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.chipRow}>
+                {PLATFORMS.filter((p) => p.id !== 'other').map((p) => {
+                  const alreadyAdded = links.some(
+                    (l) => l.label === p.label && !l.url,
+                  );
+                  return (
+                    <Pressable
+                      key={p.id}
+                      onPress={() => addPlatformLink(p)}
+                      disabled={alreadyAdded}
+                      style={({ pressed }) => [
+                        styles.chip,
+                        {
+                          borderColor: c.border,
+                          backgroundColor: pressed ? c.subtle : c.card,
+                          opacity: alreadyAdded ? 0.4 : 1,
+                        },
+                      ]}>
+                      <ThemedText style={styles.chipEmoji}>{p.emoji}</ThemedText>
+                      <ThemedText style={[styles.chipText, { color: c.text }]}>
+                        {p.label}
+                      </ThemedText>
+                    </Pressable>
+                  );
+                })}
+                <Pressable
+                  onPress={addCustomLink}
+                  style={({ pressed }) => [
+                    styles.chip,
+                    {
+                      borderColor: c.border,
+                      backgroundColor: pressed ? c.subtle : c.card,
+                      borderStyle: 'dashed',
+                    },
+                  ]}>
+                  <ThemedText style={[styles.chipText, { color: c.textSecondary }]}>
+                    + Custom
                   </ThemedText>
                 </Pressable>
-              </View>
-              {links.length === 0 ? (
-                <ThemedText style={[styles.emptyHint, { color: c.textSecondary }]}>
-                  GitHub, LinkedIn, Instagram — anything you want to share.
-                </ThemedText>
-              ) : (
+              </ScrollView>
+
+              {links.length > 0 ? (
                 <View style={styles.linksList}>
                   {links.map((l, i) => (
                     <View key={i} style={styles.linkRow}>
@@ -250,7 +312,7 @@ export default function ProfileSetupScreen() {
                       <TextInput
                         value={l.url}
                         onChangeText={(t) => setLinkUrl(i, t)}
-                        placeholder="https://…"
+                        placeholder={placeholderForRow(l)}
                         placeholderTextColor={c.textSecondary}
                         autoCapitalize="none"
                         autoCorrect={false}
@@ -273,7 +335,7 @@ export default function ProfileSetupScreen() {
                     </View>
                   ))}
                 </View>
-              )}
+              ) : null}
             </View>
 
             {err ? <ThemedText style={styles.error}>{err}</ThemedText> : null}
@@ -371,13 +433,19 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   yearText: { fontSize: 16, fontWeight: '600' },
-  linksHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  addLink: { fontSize: 13 },
   emptyHint: { fontSize: 13, lineHeight: 18, marginTop: 2 },
+  chipRow: { gap: 8, paddingVertical: 8 },
+  chip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    borderWidth: 1,
+  },
+  chipEmoji: { fontSize: 14 },
+  chipText: { fontSize: 13, fontWeight: '500' },
   linksList: { gap: 8, marginTop: 4 },
   linkRow: { flexDirection: 'row', gap: 8, alignItems: 'center' },
   linkLabel: { flex: 1 },

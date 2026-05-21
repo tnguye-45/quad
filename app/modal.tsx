@@ -15,6 +15,7 @@ import {
   type Hangout,
   type Voice,
 } from '@/lib/posts-store';
+import { linkEmoji } from '@/lib/profile-links';
 
 function normalizeUrl(raw: string): string {
   return raw.match(/^https?:\/\//i) ? raw : `https://${raw}`;
@@ -115,14 +116,19 @@ export default function MeModal() {
                       borderColor: c.border,
                     },
                   ]}>
-                  <ThemedText type="defaultSemiBold" style={[styles.linkLabel, { color: c.text }]}>
-                    {l.label}
-                  </ThemedText>
-                  <ThemedText
-                    numberOfLines={1}
-                    style={[styles.linkUrl, { color: c.textSecondary }]}>
-                    {l.url.replace(/^https?:\/\//i, '')}
-                  </ThemedText>
+                  <ThemedText style={styles.linkEmoji}>{linkEmoji(l.label, l.url)}</ThemedText>
+                  <View style={styles.linkText}>
+                    <ThemedText
+                      type="defaultSemiBold"
+                      style={[styles.linkLabel, { color: c.text }]}>
+                      {l.label}
+                    </ThemedText>
+                    <ThemedText
+                      numberOfLines={1}
+                      style={[styles.linkUrl, { color: c.textSecondary }]}>
+                      {l.url.replace(/^https?:\/\//i, '')}
+                    </ThemedText>
+                  </View>
                 </Pressable>
               ))}
             </View>
@@ -326,7 +332,6 @@ const styles = StyleSheet.create({
   linksList: { gap: 8 },
   linkRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
     paddingVertical: 12,
     paddingHorizontal: 14,
@@ -334,8 +339,10 @@ const styles = StyleSheet.create({
     borderRadius: 4,
     gap: 12,
   },
+  linkEmoji: { fontSize: 18 },
+  linkText: { flex: 1, gap: 1 },
   linkLabel: { fontSize: 14 },
-  linkUrl: { fontSize: 13, flexShrink: 1 },
+  linkUrl: { fontSize: 13 },
   historyHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',

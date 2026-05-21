@@ -18,12 +18,8 @@ type Pin = {
   kind: 'gig' | 'hangout';
 };
 
-// Notre Dame campus center — used for map view + fallback jitter for unknown locations.
 const CAMPUS_CENTER = { lat: 41.702, lon: -86.2375 };
 
-// Lightweight gazetteer of campus landmarks. Keys are lowercased substrings of
-// the post's `where` field; we match the first hit. New landmarks can be added
-// here without touching the rendering code.
 const LANDMARKS: { match: string; lat: number; lon: number }[] = [
   { match: 'dillon', lat: 41.6995, lon: -86.2382 },
   { match: 'sorin', lat: 41.7008, lon: -86.2386 },
@@ -53,8 +49,6 @@ function geocode(where: string, seedKey: string): { lat: number; lon: number } {
   for (const lm of LANDMARKS) {
     if (haystack.includes(lm.match)) return { lat: lm.lat, lon: lm.lon };
   }
-  // Deterministic jitter around campus center based on the post id so the pin
-  // doesn't jump around between renders.
   let hash = 0;
   for (let i = 0; i < seedKey.length; i++) {
     hash = (hash * 31 + seedKey.charCodeAt(i)) | 0;
@@ -99,27 +93,27 @@ function buildMapHtml(pins: Pin[]): string {
 <link rel="stylesheet" href="${BASE_URL}/leaflet/leaflet.css"/>
 <script src="${BASE_URL}/leaflet/leaflet.js"></script>
 <style>
-  html,body,#map{height:100%;margin:0;padding:0;background:#fafafa;font-family:SFMono-Regular,Menlo,Monaco,Consolas,'Liberation Mono','Courier New',monospace}
+  html,body,#map{height:100%;margin:0;padding:0;background:#FBF8F1;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}
   .pin-chip{
     display:inline-flex;align-items:center;gap:6px;
-    padding:4px 8px;background:#ffffff;border:1px solid #e5e7eb;
-    border-radius:3px;font-size:11px;font-weight:500;color:#111827;
-    line-height:1;white-space:nowrap;cursor:pointer;
+    padding:5px 10px;background:#FBF8F1;border:1px solid #E8DFC9;
+    border-radius:14px;font-size:11px;font-weight:600;color:#0C2340;
+    line-height:1;white-space:nowrap;cursor:pointer;letter-spacing:-0.1px;
+    box-shadow:0 1px 2px rgba(12,35,64,.06);
     transition:transform .15s ease, box-shadow .15s ease;
   }
-  .pin-chip:hover{transform:translateY(-1px);box-shadow:0 4px 12px rgba(0,0,0,.12)}
-  .pin-chip .dot{
-    width:6px;height:6px;border-radius:3px;flex-shrink:0;
-  }
-  .pin-chip .dot.gig{background:#111827}
-  .pin-chip .dot.hangout{background:transparent;border:1px solid #111827}
+  .pin-chip:hover{transform:translateY(-1px);box-shadow:0 4px 12px rgba(12,35,64,.14)}
+  .pin-chip .dot{width:6px;height:6px;border-radius:3px;flex-shrink:0}
+  .pin-chip .dot.gig{background:#0C2340}
+  .pin-chip .dot.hangout{background:#C99700}
   .leaflet-marker-icon.pin-wrap{background:transparent;border:none}
-  .leaflet-popup-content-wrapper{border-radius:4px;box-shadow:0 4px 14px rgba(0,0,0,.12);padding:2px}
-  .leaflet-popup-content{margin:10px 14px;font-size:12px;color:#111827;line-height:1.45}
-  .leaflet-popup-content b{display:block;margin-bottom:3px;font-size:13px;font-weight:600}
-  .leaflet-popup-content .meta{color:#6b7280;font-size:11px}
-  .leaflet-popup-tip{box-shadow:none}
-  .leaflet-control-attribution{font-size:10px;background:rgba(255,255,255,.7)}
+  .leaflet-popup-content-wrapper{border-radius:8px;box-shadow:0 4px 14px rgba(12,35,64,.12);padding:2px;background:#FBF8F1}
+  .leaflet-popup-content{margin:10px 14px;font-size:13px;color:#0C2340;line-height:1.45}
+  .leaflet-popup-content b{display:block;margin-bottom:3px;font-size:14px;font-weight:700;letter-spacing:-0.2px}
+  .leaflet-popup-content .meta{color:#5D6B85;font-size:11px;font-family:SFMono-Regular,Menlo,Monaco,Consolas,monospace;letter-spacing:0.3px}
+  .leaflet-popup-tip{box-shadow:none;background:#FBF8F1}
+  .leaflet-control-attribution{font-size:10px;background:rgba(251,248,241,.8);color:#5D6B85}
+  .leaflet-control-attribution a{color:#0C2340}
 </style>
 </head>
 <body>
@@ -177,10 +171,16 @@ export default function MapScreen() {
           }}
         />
       ) : (
-        <View style={[styles.placeholder, { backgroundColor: c.subtle }]}>
-          <ThemedText type="title">Map</ThemedText>
-          <ThemedText style={[styles.placeholderSubtle, { color: c.textSecondary }]}>
-            Interactive map is web-only for now.{'\n'}Native map coming soon.
+        <View style={[styles.placeholder, { backgroundColor: c.surface }]}>
+          <ThemedText style={[styles.placeholderEyebrow, { color: c.accent }]} type="mono">
+            map · coming soon
+          </ThemedText>
+          <ThemedText style={[styles.placeholderTitle, { color: c.text }]}>
+            Native map is on the way
+          </ThemedText>
+          <ThemedText style={[styles.placeholderBody, { color: c.textSecondary }]}>
+            For now, open quad on the web to see gigs and hangouts pinned on the
+            Notre Dame campus map.
           </ThemedText>
         </View>
       )}
@@ -188,14 +188,24 @@ export default function MapScreen() {
       <View style={styles.topOverlay} pointerEvents="box-none">
         <View
           style={[
-            styles.brandPill,
-            { backgroundColor: c.card, borderColor: c.border },
+            styles.headerPill,
+            { backgroundColor: c.background, borderColor: c.border },
           ]}>
-          <NamePlaque size="sm" />
-          <View style={[styles.dot, { backgroundColor: c.border }]} />
-          <ThemedText style={[styles.brandSubtle, { color: c.textSecondary }]}>
-            Notre Dame
-          </ThemedText>
+          <Pressable
+            onPress={() => router.back()}
+            hitSlop={10}
+            style={({ pressed }) => [styles.backBtn, { opacity: pressed ? 0.5 : 1 }]}>
+            <IconSymbol name="chevron.left" size={20} color={c.text} />
+          </Pressable>
+          <View style={styles.headerCenter}>
+            <NamePlaque size="sm" />
+            <ThemedText
+              style={[styles.headerSubtitle, { color: c.textMuted }]}
+              type="mono">
+              campus map · notre dame
+            </ThemedText>
+          </View>
+          <View style={styles.backBtn} />
         </View>
       </View>
 
@@ -203,32 +213,32 @@ export default function MapScreen() {
         <View
           style={[
             styles.legend,
-            { backgroundColor: c.card, borderColor: c.border },
+            { backgroundColor: c.background, borderColor: c.border },
           ]}>
           <View style={styles.legendRow}>
-            <ThemedText style={styles.legendNumber}>{gigCount}</ThemedText>
-            <ThemedText style={[styles.legendLabel, { color: c.textSecondary }]}>
-              open gigs
+            <View style={[styles.legendDot, { backgroundColor: c.tint }]} />
+            <ThemedText style={[styles.legendNumber, { color: c.text }]}>
+              {gigCount}
+            </ThemedText>
+            <ThemedText
+              style={[styles.legendLabel, { color: c.textMuted }]}
+              type="mono">
+              gigs
             </ThemedText>
           </View>
           <View style={[styles.legendDivider, { backgroundColor: c.border }]} />
           <View style={styles.legendRow}>
-            <ThemedText style={styles.legendNumber}>{hangoutCount}</ThemedText>
-            <ThemedText style={[styles.legendLabel, { color: c.textSecondary }]}>
+            <View style={[styles.legendDot, { backgroundColor: c.accent }]} />
+            <ThemedText style={[styles.legendNumber, { color: c.text }]}>
+              {hangoutCount}
+            </ThemedText>
+            <ThemedText
+              style={[styles.legendLabel, { color: c.textMuted }]}
+              type="mono">
               hangouts
             </ThemedText>
           </View>
         </View>
-
-        <Pressable
-          style={({ pressed }) => [
-            styles.fab,
-            { backgroundColor: c.tint, opacity: pressed ? 0.85 : 1 },
-          ]}
-          onPress={() => router.push('/post-gig')}>
-          <IconSymbol name="plus" size={18} color={c.background} />
-          <ThemedText style={[styles.fabText, { color: c.background }]}>Post</ThemedText>
-        </Pressable>
       </View>
     </ThemedView>
   );
@@ -242,48 +252,73 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 12,
-    padding: 32,
+    gap: 10,
+    paddingHorizontal: 36,
   },
-  placeholderSubtle: {
-    fontSize: 14,
+  placeholderEyebrow: {
+    fontSize: 10,
+    letterSpacing: 1.4,
+    textTransform: 'uppercase',
+    fontWeight: '700',
+  },
+  placeholderTitle: {
+    fontSize: 22,
+    fontWeight: '800',
+    letterSpacing: -0.4,
+    lineHeight: 26,
     textAlign: 'center',
+  },
+  placeholderBody: {
+    fontSize: 14,
     lineHeight: 20,
+    textAlign: 'center',
+    marginTop: 4,
   },
   topOverlay: {
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
-    paddingTop: 56,
+    paddingTop: 52,
+    paddingHorizontal: 16,
     alignItems: 'center',
   },
-  brandPill: {
+  headerPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    paddingHorizontal: 14,
+    gap: 8,
+    paddingHorizontal: 10,
     paddingVertical: 8,
-    borderRadius: 4,
-    borderWidth: 1,
+    borderRadius: 24,
+    borderWidth: StyleSheet.hairlineWidth,
+    shadowColor: '#0C2340',
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 3,
   },
-  dot: {
-    width: 4,
-    height: 4,
-    borderRadius: 2,
+  backBtn: {
+    width: 30,
+    height: 30,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  brandSubtle: {
-    fontSize: 13,
+  headerCenter: {
+    alignItems: 'center',
+    gap: 2,
+    paddingHorizontal: 4,
+  },
+  headerSubtitle: {
+    fontSize: 9,
+    letterSpacing: 0.6,
+    textTransform: 'lowercase',
   },
   bottomOverlay: {
     position: 'absolute',
-    bottom: 24,
+    bottom: 96,
     left: 0,
     right: 0,
-    flexDirection: 'row',
-    justifyContent: 'center',
     alignItems: 'center',
-    gap: 12,
     paddingHorizontal: 20,
   },
   legend: {
@@ -291,41 +326,38 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 14,
     paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 4,
-    borderWidth: 1,
+    paddingVertical: 10,
+    borderRadius: 24,
+    borderWidth: StyleSheet.hairlineWidth,
+    shadowColor: '#0C2340',
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 3,
   },
   legendRow: {
     flexDirection: 'row',
-    alignItems: 'baseline',
-    gap: 5,
-  },
-  legendNumber: {
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  legendLabel: {
-    fontSize: 12,
-  },
-  legendDivider: {
-    width: 1,
-    height: 18,
-  },
-  fab: {
-    flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    paddingHorizontal: 18,
-    paddingVertical: 12,
-    borderRadius: 999,
-    shadowColor: '#000',
-    shadowOpacity: 0.12,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 4,
   },
-  fabText: {
+  legendDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  legendNumber: {
+    fontSize: 15,
+    fontWeight: '800',
+    letterSpacing: -0.2,
+  },
+  legendLabel: {
+    fontSize: 10,
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
     fontWeight: '600',
-    fontSize: 14,
+  },
+  legendDivider: {
+    width: StyleSheet.hairlineWidth,
+    height: 16,
   },
 });

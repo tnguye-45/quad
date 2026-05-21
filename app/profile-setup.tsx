@@ -12,7 +12,7 @@ import {
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Colors, Fonts } from '@/constants/theme';
+import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useAuth, type ProfileLink } from '@/lib/auth-context';
 import { detectPlatform, PLATFORMS, type Platform as LinkPlatform } from '@/lib/profile-links';
@@ -50,8 +50,6 @@ export default function ProfileSetupScreen() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  // Keep local state in sync if the profile loads after first render (e.g., on
-  // first-time setup the trigger creates the row a beat after signup).
   useEffect(() => {
     if (!profile) return;
     setDisplayName((cur) => cur || profile.display_name || '');
@@ -72,8 +70,6 @@ export default function ProfileSetupScreen() {
     setLinks((cur) =>
       cur.map((l, idx) => {
         if (idx !== i) return l;
-        // If the user pastes a URL for a known platform and the label is
-        // either empty or still the default placeholder, fill it in.
         const detected = detectPlatform(url);
         const labelIsAuto = !l.label || PLATFORMS.some((p) => p.label === l.label);
         return {
@@ -94,7 +90,6 @@ export default function ProfileSetupScreen() {
     setLinks((cur) => cur.filter((_, idx) => idx !== i));
   }
 
-  // Surfaces a platform's placeholder so the URL hint matches what was added.
   function placeholderForRow(row: ProfileLink): string {
     const fromUrl = detectPlatform(row.url);
     if (fromUrl) return fromUrl.placeholder;
@@ -118,7 +113,6 @@ export default function ProfileSetupScreen() {
 
     setBusy(true);
 
-    // Dev mode has no real auth token — skip Supabase and just bounce back.
     if (isDev) {
       setBusy(false);
       router.replace('/(tabs)');
@@ -157,8 +151,11 @@ export default function ProfileSetupScreen() {
           contentContainerStyle={styles.scroll}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}>
-          <View style={styles.heroBlock}>
-            <ThemedText type="title" style={styles.heading}>
+          <View style={styles.hero}>
+            <ThemedText style={[styles.eyebrow, { color: c.accent }]} type="mono">
+              {isEditing ? 'edit' : 'one more thing'}
+            </ThemedText>
+            <ThemedText style={[styles.heading, { color: c.text }]}>
               {isEditing ? 'Edit your profile' : 'Set up your profile'}
             </ThemedText>
             <ThemedText style={[styles.tagline, { color: c.textSecondary }]}>
@@ -166,228 +163,235 @@ export default function ProfileSetupScreen() {
             </ThemedText>
           </View>
 
-          <View style={styles.form}>
-            <Field
-              label="Display name *"
+          <FieldGroup label="Display name" colors={c}>
+            <TextInput
               value={displayName}
               onChangeText={setDisplayName}
               placeholder="First Last"
+              placeholderTextColor={c.textMuted}
               autoCapitalize="words"
-              colors={c}
+              style={[styles.input, { color: c.text }]}
             />
+            <View style={[styles.underline, { backgroundColor: c.border }]} />
+          </FieldGroup>
 
-            <View style={styles.fieldGroup}>
-              <ThemedText style={[styles.fieldLabel, { color: c.textSecondary }]}>
-                Year *
-              </ThemedText>
-              <View style={styles.yearRow}>
-                {YEARS.map((y) => {
-                  const active = year === y;
-                  return (
-                    <Pressable
-                      key={y}
-                      onPress={() => setYear(y)}
+          <View style={styles.fieldGroup}>
+            <ThemedText style={[styles.label, { color: c.textMuted }]} type="mono">
+              year
+            </ThemedText>
+            <View style={styles.yearRow}>
+              {YEARS.map((y) => {
+                const active = year === y;
+                return (
+                  <Pressable
+                    key={y}
+                    onPress={() => setYear(y)}
+                    style={styles.yearItem}>
+                    <View
                       style={[
-                        styles.yearPill,
+                        styles.yearBubble,
                         {
-                          backgroundColor: active ? c.tint : c.card,
-                          borderColor: active ? c.tint : c.border,
+                          borderColor: active ? c.accent : c.border,
+                          backgroundColor: active ? c.surface : c.background,
+                          borderWidth: active ? 2.5 : 1.5,
                         },
                       ]}>
                       <ThemedText
-                        style={[styles.yearText, { color: active ? c.background : c.text }]}>
+                        style={[
+                          styles.yearText,
+                          { color: active ? c.text : c.textSecondary },
+                          active && { fontWeight: '700' },
+                        ]}>
                         {y}
                       </ThemedText>
-                    </Pressable>
-                  );
-                })}
-              </View>
+                    </View>
+                  </Pressable>
+                );
+              })}
             </View>
+          </View>
 
-            <Field
-              label="Major *"
+          <FieldGroup label="Major" colors={c}>
+            <TextInput
               value={major}
               onChangeText={setMajor}
-              placeholder="e.g. Computer Science"
-              colors={c}
+              placeholder="Computer Science"
+              placeholderTextColor={c.textMuted}
+              style={[styles.input, { color: c.text }]}
             />
-            <Field
-              label="Dorm (optional)"
+            <View style={[styles.underline, { backgroundColor: c.border }]} />
+          </FieldGroup>
+
+          <FieldGroup label="Dorm (optional)" colors={c}>
+            <TextInput
               value={dorm}
               onChangeText={setDorm}
-              placeholder="e.g. Dillon Hall"
-              colors={c}
+              placeholder="Dillon Hall"
+              placeholderTextColor={c.textMuted}
+              style={[styles.input, { color: c.text }]}
             />
+            <View style={[styles.underline, { backgroundColor: c.border }]} />
+          </FieldGroup>
 
-            <View style={styles.fieldGroup}>
-              <ThemedText style={[styles.fieldLabel, { color: c.textSecondary }]}>
-                Bio
+          <View style={styles.fieldGroup}>
+            <View style={styles.labelRow}>
+              <ThemedText style={[styles.label, { color: c.textMuted }]} type="mono">
+                bio
               </ThemedText>
-              <TextInput
-                value={bio}
-                onChangeText={setBio}
-                placeholder="A sentence or two about you."
-                placeholderTextColor={c.textSecondary}
-                multiline
-                numberOfLines={3}
-                maxLength={240}
-                style={[
-                  styles.input,
-                  styles.bioInput,
-                  { borderColor: c.border, color: c.text, backgroundColor: c.card },
-                ]}
-              />
-              <ThemedText style={[styles.charCount, { color: c.textSecondary }]}>
+              <ThemedText style={[styles.charCount, { color: c.textMuted }]} type="mono">
                 {bio.length}/240
               </ThemedText>
             </View>
+            <TextInput
+              value={bio}
+              onChangeText={setBio}
+              placeholder="A sentence or two about you."
+              placeholderTextColor={c.textMuted}
+              multiline
+              numberOfLines={3}
+              maxLength={240}
+              style={[styles.input, styles.bioInput, { color: c.text }]}
+            />
+            <View style={[styles.underline, { backgroundColor: c.border }]} />
+          </View>
 
-            <View style={styles.fieldGroup}>
-              <ThemedText style={[styles.fieldLabel, { color: c.textSecondary }]}>
-                Social & professional accounts
-              </ThemedText>
-              <ThemedText style={[styles.emptyHint, { color: c.textSecondary }]}>
-                Tap a platform to add it. Other students will see these on your profile.
-              </ThemedText>
+          <View style={styles.fieldGroup}>
+            <ThemedText style={[styles.label, { color: c.textMuted }]} type="mono">
+              social & professional
+            </ThemedText>
+            <ThemedText style={[styles.emptyHint, { color: c.textSecondary }]}>
+              Tap a platform to add it. Other students will see these on your profile.
+            </ThemedText>
 
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.chipRow}>
-                {PLATFORMS.filter((p) => p.id !== 'other').map((p) => {
-                  const alreadyAdded = links.some(
-                    (l) => l.label === p.label && !l.url,
-                  );
-                  return (
-                    <Pressable
-                      key={p.id}
-                      onPress={() => addPlatformLink(p)}
-                      disabled={alreadyAdded}
-                      style={({ pressed }) => [
-                        styles.chip,
-                        {
-                          borderColor: c.border,
-                          backgroundColor: pressed ? c.subtle : c.card,
-                          opacity: alreadyAdded ? 0.4 : 1,
-                        },
-                      ]}>
-                      <ThemedText style={styles.chipEmoji}>{p.emoji}</ThemedText>
-                      <ThemedText style={[styles.chipText, { color: c.text }]}>
-                        {p.label}
-                      </ThemedText>
-                    </Pressable>
-                  );
-                })}
-                <Pressable
-                  onPress={addCustomLink}
-                  style={({ pressed }) => [
-                    styles.chip,
-                    {
-                      borderColor: c.border,
-                      backgroundColor: pressed ? c.subtle : c.card,
-                      borderStyle: 'dashed',
-                    },
-                  ]}>
-                  <ThemedText style={[styles.chipText, { color: c.textSecondary }]}>
-                    + Custom
-                  </ThemedText>
-                </Pressable>
-              </ScrollView>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.chipRow}>
+              {PLATFORMS.filter((p) => p.id !== 'other').map((p) => {
+                const alreadyAdded = links.some(
+                  (l) => l.label === p.label && !l.url,
+                );
+                return (
+                  <Pressable
+                    key={p.id}
+                    onPress={() => addPlatformLink(p)}
+                    disabled={alreadyAdded}
+                    style={({ pressed }) => [
+                      styles.chip,
+                      {
+                        borderColor: c.border,
+                        backgroundColor: pressed ? c.subtle : c.background,
+                        opacity: alreadyAdded ? 0.4 : 1,
+                      },
+                    ]}>
+                    <ThemedText style={styles.chipEmoji}>{p.emoji}</ThemedText>
+                    <ThemedText style={[styles.chipText, { color: c.text }]}>
+                      {p.label}
+                    </ThemedText>
+                  </Pressable>
+                );
+              })}
+              <Pressable
+                onPress={addCustomLink}
+                style={({ pressed }) => [
+                  styles.chip,
+                  {
+                    borderColor: c.border,
+                    backgroundColor: pressed ? c.subtle : c.background,
+                    borderStyle: 'dashed',
+                  },
+                ]}>
+                <ThemedText style={[styles.chipText, { color: c.textSecondary }]}>
+                  + custom
+                </ThemedText>
+              </Pressable>
+            </ScrollView>
 
-              {links.length > 0 ? (
-                <View style={styles.linksList}>
-                  {links.map((l, i) => (
-                    <View key={i} style={styles.linkRow}>
+            {links.length > 0 ? (
+              <View style={styles.linksList}>
+                {links.map((l, i) => (
+                  <View key={i} style={[styles.linkRow, { borderBottomColor: c.border }]}>
+                    <View style={styles.linkInputs}>
                       <TextInput
                         value={l.label}
                         onChangeText={(t) => setLinkLabel(i, t)}
                         placeholder="Label"
-                        placeholderTextColor={c.textSecondary}
-                        style={[
-                          styles.input,
-                          styles.linkLabel,
-                          { borderColor: c.border, color: c.text, backgroundColor: c.card },
-                        ]}
+                        placeholderTextColor={c.textMuted}
+                        style={[styles.linkLabelInput, { color: c.text }]}
                       />
                       <TextInput
                         value={l.url}
                         onChangeText={(t) => setLinkUrl(i, t)}
                         placeholder={placeholderForRow(l)}
-                        placeholderTextColor={c.textSecondary}
+                        placeholderTextColor={c.textMuted}
                         autoCapitalize="none"
                         autoCorrect={false}
                         keyboardType="url"
-                        style={[
-                          styles.input,
-                          styles.linkUrl,
-                          { borderColor: c.border, color: c.text, backgroundColor: c.card },
-                        ]}
+                        style={[styles.linkUrlInput, { color: c.textSecondary }]}
                       />
-                      <Pressable
-                        onPress={() => removeLink(i)}
-                        hitSlop={8}
-                        style={styles.removeBtn}>
-                        <ThemedText
-                          style={[styles.removeBtnText, { color: c.textSecondary }]}>
-                          ×
-                        </ThemedText>
-                      </Pressable>
                     </View>
-                  ))}
-                </View>
-              ) : null}
-            </View>
-
-            {err ? <ThemedText style={styles.error}>{err}</ThemedText> : null}
-
-            <Pressable
-              disabled={!canSubmit}
-              onPress={handleSave}
-              style={({ pressed }) => [
-                styles.cta,
-                {
-                  backgroundColor: c.tint,
-                  opacity: !canSubmit ? 0.4 : pressed ? 0.85 : 1,
-                },
-              ]}>
-              <ThemedText style={[styles.ctaText, { color: c.background }]}>
-                {busy ? 'Saving…' : isEditing ? 'Save changes' : 'Save and continue'}
-              </ThemedText>
-            </Pressable>
-
-            {isEditing ? (
-              <Pressable onPress={() => router.back()} style={styles.cancelBtn}>
-                <ThemedText style={[styles.cancelText, { color: c.textSecondary }]}>
-                  Cancel
-                </ThemedText>
-              </Pressable>
+                    <Pressable
+                      onPress={() => removeLink(i)}
+                      hitSlop={8}
+                      style={({ pressed }) => [styles.removeBtn, { opacity: pressed ? 0.5 : 1 }]}>
+                      <ThemedText
+                        style={[styles.removeBtnText, { color: c.textMuted }]}>
+                        ×
+                      </ThemedText>
+                    </Pressable>
+                  </View>
+                ))}
+              </View>
             ) : null}
           </View>
+
+          {err ? (
+            <ThemedText style={[styles.error, { color: c.danger }]}>{err}</ThemedText>
+          ) : null}
+
+          <Pressable
+            disabled={!canSubmit}
+            onPress={handleSave}
+            style={({ pressed }) => [
+              styles.cta,
+              {
+                backgroundColor: c.tint,
+                opacity: !canSubmit ? 0.35 : pressed ? 0.85 : 1,
+              },
+            ]}>
+            <ThemedText style={[styles.ctaText, { color: c.background }]}>
+              {busy ? 'Saving…' : isEditing ? 'Save changes' : 'Save and continue'}
+            </ThemedText>
+          </Pressable>
+
+          {isEditing ? (
+            <Pressable onPress={() => router.back()} style={styles.cancelBtn} hitSlop={8}>
+              <ThemedText style={[styles.cancelText, { color: c.textMuted }]} type="mono">
+                cancel
+              </ThemedText>
+            </Pressable>
+          ) : null}
         </ScrollView>
       </ThemedView>
     </KeyboardAvoidingView>
   );
 }
 
-function Field({
+function FieldGroup({
   label,
+  children,
   colors,
-  ...rest
-}: React.ComponentProps<typeof TextInput> & {
+}: {
   label: string;
+  children: React.ReactNode;
   colors: (typeof Colors)['light'];
 }) {
   return (
     <View style={styles.fieldGroup}>
-      <ThemedText style={[styles.fieldLabel, { color: colors.textSecondary }]}>{label}</ThemedText>
-      <TextInput
-        {...rest}
-        placeholderTextColor={colors.textSecondary}
-        style={[
-          styles.input,
-          { borderColor: colors.border, color: colors.text, backgroundColor: colors.card },
-        ]}
-      />
+      <ThemedText style={[styles.label, { color: colors.textMuted }]} type="mono">
+        {label.toLowerCase()}
+      </ThemedText>
+      {children}
     </View>
   );
 }
@@ -396,44 +400,70 @@ const styles = StyleSheet.create({
   screen: { flex: 1 },
   scroll: {
     paddingTop: 80,
-    paddingBottom: 40,
+    paddingBottom: 48,
     paddingHorizontal: 28,
-    gap: 32,
+    gap: 24,
   },
-  heroBlock: { gap: 10 },
-  heading: { fontSize: 26, lineHeight: 32 },
-  tagline: { fontSize: 15, lineHeight: 22 },
-  form: { gap: 20 },
-  fieldGroup: { gap: 6 },
-  fieldLabel: { fontSize: 12, letterSpacing: 0.3, textTransform: 'uppercase' },
-  input: {
-    borderWidth: 1,
-    borderRadius: 4,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
+  hero: { gap: 6 },
+  eyebrow: {
+    fontSize: 10,
+    letterSpacing: 1.4,
+    textTransform: 'uppercase',
+    fontWeight: '700',
+  },
+  heading: {
+    fontSize: 30,
+    fontWeight: '800',
+    letterSpacing: -0.8,
+    lineHeight: 34,
+  },
+  tagline: {
     fontSize: 14,
-    fontFamily: Fonts?.mono,
+    lineHeight: 20,
+    marginTop: 4,
+  },
+  fieldGroup: { gap: 10 },
+  labelRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  label: {
+    fontSize: 10,
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
+    fontWeight: '600',
+  },
+  input: {
+    fontSize: 17,
+    paddingVertical: 8,
+    paddingHorizontal: 0,
   },
   bioInput: {
-    minHeight: 84,
+    minHeight: 64,
     textAlignVertical: 'top',
-    paddingTop: 12,
+    paddingTop: 4,
   },
+  underline: { height: 1 },
   charCount: {
-    fontSize: 11,
-    alignSelf: 'flex-end',
+    fontSize: 10,
+    letterSpacing: 0.6,
   },
-  yearRow: { flexDirection: 'row', gap: 8, marginTop: 4 },
-  yearPill: {
+  yearRow: {
+    flexDirection: 'row',
+    gap: 12,
+    paddingTop: 4,
+  },
+  yearItem: { alignItems: 'center' },
+  yearBubble: {
     width: 48,
-    height: 44,
-    borderRadius: 4,
-    borderWidth: 1,
+    height: 48,
+    borderRadius: 24,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  yearText: { fontSize: 16, fontWeight: '600' },
-  emptyHint: { fontSize: 13, lineHeight: 18, marginTop: 2 },
+  yearText: { fontSize: 17 },
+  emptyHint: { fontSize: 13, lineHeight: 18 },
   chipRow: { gap: 8, paddingVertical: 8 },
   chip: {
     flexDirection: 'row',
@@ -441,30 +471,50 @@ const styles = StyleSheet.create({
     gap: 6,
     paddingHorizontal: 12,
     paddingVertical: 8,
-    borderRadius: 999,
-    borderWidth: 1,
+    borderRadius: 4,
+    borderWidth: StyleSheet.hairlineWidth,
   },
   chipEmoji: { fontSize: 14 },
   chipText: { fontSize: 13, fontWeight: '500' },
-  linksList: { gap: 8, marginTop: 4 },
-  linkRow: { flexDirection: 'row', gap: 8, alignItems: 'center' },
-  linkLabel: { flex: 1 },
-  linkUrl: { flex: 2 },
+  linksList: { gap: 0 },
+  linkRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  linkInputs: { flex: 1, gap: 2 },
+  linkLabelInput: {
+    fontSize: 15,
+    fontWeight: '600',
+    paddingVertical: 4,
+    paddingHorizontal: 0,
+  },
+  linkUrlInput: {
+    fontSize: 12,
+    paddingVertical: 2,
+    paddingHorizontal: 0,
+  },
   removeBtn: {
     width: 32,
-    height: 44,
+    height: 32,
     alignItems: 'center',
     justifyContent: 'center',
   },
   removeBtnText: { fontSize: 22, lineHeight: 22 },
-  error: { fontSize: 14, lineHeight: 20, color: '#dc2626' },
+  error: { fontSize: 13, lineHeight: 18 },
   cta: {
     marginTop: 8,
     paddingVertical: 16,
-    borderRadius: 4,
+    borderRadius: 12,
     alignItems: 'center',
   },
-  ctaText: { fontSize: 16, fontWeight: '600' },
-  cancelBtn: { paddingVertical: 12, alignItems: 'center' },
-  cancelText: { fontSize: 14 },
+  ctaText: { fontSize: 15, fontWeight: '700', letterSpacing: 0.2 },
+  cancelBtn: { paddingVertical: 8, alignItems: 'center' },
+  cancelText: {
+    fontSize: 11,
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
+  },
 });

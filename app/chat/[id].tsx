@@ -12,7 +12,8 @@ import {
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Colors, Fonts } from '@/constants/theme';
+import { IconSymbol } from '@/components/ui/icon-symbol';
+import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useAuth } from '@/lib/auth-context';
 import { useThread } from '@/lib/messaging';
@@ -110,14 +111,37 @@ function formatTime(d: Date): string {
   return `${h}:${m.toString().padStart(2, '0')} ${ampm}`;
 }
 
+// Format a timestamp the way iMessage / Instagram DM does:
+// — same day: "2:14 PM"
+// — yesterday: "Yesterday 2:14 PM"
+// — earlier this week: "Mon 2:14 PM"
+// — older: "Mar 5, 2:14 PM"
+function formatStamp(ts: number, now = Date.now()): string {
+  const d = new Date(ts);
+  const time = formatTime(d);
+  const sameDay =
+    d.toDateString() === new Date(now).toDateString();
+  if (sameDay) return time;
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  if (d.toDateString() === yesterday.toDateString()) return `Yesterday ${time}`;
+  const daysAgo = (now - ts) / 86_400_000;
+  if (daysAgo < 7) {
+    const wd = d.toLocaleDateString(undefined, { weekday: 'short' });
+    return `${wd} ${time}`;
+  }
+  const md = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  return `${md}, ${time}`;
+}
+
+const TIME_CLUSTER_GAP_MS = 5 * 60 * 1000;
+
 export default function ChatScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const c = Colors[useColorScheme() ?? 'light'];
   const { session, isDev } = useAuth();
   const realSession = !!session && !isDev;
   const mock = id ? MOCK_CONVOS[id] : undefined;
-  // Use real backend when we have a real session AND the id isn't a known
-  // mock label. UUIDs from the gig-detail flow always fall through to real.
   const useReal = realSession && !mock;
 
   if (useReal) {
@@ -129,24 +153,54 @@ export default function ChatScreen() {
   return <EmptyChat colors={c} />;
 }
 
+function Header({
+  colors: c,
+  name,
+  context,
+  initials,
+  online,
+}: {
+  colors: (typeof Colors)['light'];
+  name: string;
+  context: string;
+  initials?: string;
+  online?: boolean;
+}) {
+  return (
+    <View style={[styles.header, { borderBottomColor: c.border, backgroundColor: c.background }]}>
+      <Pressable
+        onPress={() => router.back()}
+        hitSlop={12}
+        style={({ pressed }) => [styles.backBtn, { opacity: pressed ? 0.5 : 1 }]}>
+        <IconSymbol name="chevron.left" size={26} color={c.text} />
+      </Pressable>
+      {initials ? (
+        <View style={[styles.headerAvatar, { backgroundColor: c.subtle, borderColor: c.borderStrong }]}>
+          <ThemedText style={[styles.headerAvatarText, { color: c.text }]}>{initials}</ThemedText>
+          {online ? (
+            <View style={[styles.onlineDot, { backgroundColor: '#22C55E', borderColor: c.background }]} />
+          ) : null}
+        </View>
+      ) : null}
+      <View style={{ flex: 1 }}>
+        <ThemedText style={[styles.headerName, { color: c.text }]}>{name}</ThemedText>
+        <ThemedText
+          style={[styles.headerContext, { color: c.textMuted }]}
+          type="mono"
+          numberOfLines={1}>
+          {context.toLowerCase()}
+        </ThemedText>
+      </View>
+    </View>
+  );
+}
+
 function EmptyChat({ colors }: { colors: (typeof Colors)['light'] }) {
   return (
     <ThemedView style={[styles.screen, { backgroundColor: colors.background }]}>
-      <View style={[styles.header, { borderBottomColor: colors.border, backgroundColor: colors.background }]}>
-        <Pressable onPress={() => router.back()} hitSlop={12}>
-          <ThemedText style={styles.back}>‹</ThemedText>
-        </Pressable>
-        <View style={{ flex: 1 }}>
-          <ThemedText type="defaultSemiBold" style={styles.headerName}>
-            New conversation
-          </ThemedText>
-          <ThemedText style={[styles.headerContext, { color: colors.textSecondary }]}>
-            No messages yet
-          </ThemedText>
-        </View>
-      </View>
+      <Header colors={colors} name="New conversation" context="No messages yet" />
       <View style={styles.emptyBlock}>
-        <ThemedText type="title" style={styles.emptyHeading}>
+        <ThemedText style={[styles.emptyHeading, { color: colors.text }]}>
           Nothing here yet
         </ThemedText>
         <ThemedText style={[styles.emptyBody, { color: colors.textSecondary }]}>
@@ -195,90 +249,69 @@ function RealChat({
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       style={{ flex: 1 }}>
       <ThemedView style={[styles.screen, { backgroundColor: c.background }]}>
-        <View style={[styles.header, { borderBottomColor: c.border, backgroundColor: c.background }]}>
-          <Pressable onPress={() => router.back()} hitSlop={12}>
-            <ThemedText style={styles.back}>‹</ThemedText>
-          </Pressable>
-          <View style={[styles.headerAvatar, { backgroundColor: c.subtle, borderColor: c.border }]}>
-            <ThemedText style={styles.headerAvatarText}>{partnerInitials}</ThemedText>
-          </View>
-          <View style={{ flex: 1 }}>
-            <ThemedText type="defaultSemiBold" style={styles.headerName}>
-              {partnerName}
-            </ThemedText>
-            <ThemedText style={[styles.headerContext, { color: c.textSecondary }]} numberOfLines={1}>
-              {contextLabel}
-            </ThemedText>
-          </View>
-        </View>
+        <Header
+          colors={c}
+          name={partnerName}
+          context={contextLabel}
+          initials={partnerInitials}
+        />
 
         <ScrollView
           ref={scrollRef}
           contentContainerStyle={styles.messages}
           showsVerticalScrollIndicator={false}>
           {loading && messages.length === 0 ? (
-            <ThemedText style={[styles.loadingHint, { color: c.textSecondary }]}>
-              Loading…
+            <ThemedText style={[styles.loadingHint, { color: c.textMuted }]} type="mono">
+              loading…
             </ThemedText>
           ) : messages.length === 0 ? (
-            <ThemedText style={[styles.loadingHint, { color: c.textSecondary }]}>
-              No messages yet — say hi.
+            <ThemedText style={[styles.loadingHint, { color: c.textMuted }]} type="mono">
+              no messages yet — say hi
             </ThemedText>
           ) : (
-            messages.map((m, i) => (
-              <View key={m.id ?? i}>
-                <View style={[styles.bubbleRow, m.sender_id === userId && styles.bubbleRowRight]}>
-                  <View
-                    style={[
-                      styles.bubble,
-                      m.sender_id === userId
-                        ? { backgroundColor: c.tint, borderTopRightRadius: 4 }
-                        : { backgroundColor: c.subtle, borderTopLeftRadius: 4 },
-                    ]}>
+            messages.map((m, i) => {
+              const prev = messages[i - 1];
+              const showStamp =
+                !prev || m.sent_at - prev.sent_at > TIME_CLUSTER_GAP_MS;
+              const isMine = m.sender_id === userId;
+              return (
+                <View key={m.id ?? i}>
+                  {showStamp ? (
                     <ThemedText
-                      style={[
-                        styles.bubbleText,
-                        { color: m.sender_id === userId ? c.background : c.text },
-                      ]}>
-                      {m.body}
+                      style={[styles.clusterStamp, { color: c.textMuted }]}
+                      type="mono">
+                      {formatStamp(m.sent_at)}
                     </ThemedText>
+                  ) : null}
+                  <View style={[styles.bubbleRow, isMine && styles.bubbleRowRight]}>
+                    <View
+                      style={[
+                        styles.bubble,
+                        isMine
+                          ? { backgroundColor: c.tint, borderBottomRightRadius: 4 }
+                          : { backgroundColor: c.subtle, borderBottomLeftRadius: 4 },
+                      ]}>
+                      <ThemedText
+                        style={[
+                          styles.bubbleText,
+                          { color: isMine ? c.background : c.text },
+                        ]}>
+                        {m.body}
+                      </ThemedText>
+                    </View>
                   </View>
                 </View>
-              </View>
-            ))
+              );
+            })
           )}
         </ScrollView>
 
-        <View style={[styles.inputBar, { borderTopColor: c.border, backgroundColor: c.background }]}>
-          <TextInput
-            value={draft}
-            onChangeText={setDraft}
-            onSubmitEditing={handleSend}
-            placeholder="Message..."
-            placeholderTextColor={c.textSecondary}
-            returnKeyType="send"
-            blurOnSubmit={false}
-            style={[styles.input, { color: c.text, backgroundColor: c.subtle, borderColor: c.border }]}
-          />
-          <Pressable
-            onPress={handleSend}
-            disabled={!draft.trim()}
-            style={({ pressed }) => [
-              styles.sendBtn,
-              {
-                backgroundColor: draft.trim() ? c.tint : c.subtle,
-                opacity: pressed ? 0.7 : 1,
-              },
-            ]}>
-            <ThemedText
-              style={[
-                styles.sendText,
-                { color: draft.trim() ? c.background : c.textSecondary },
-              ]}>
-              Send
-            </ThemedText>
-          </Pressable>
-        </View>
+        <InputBar
+          draft={draft}
+          setDraft={setDraft}
+          onSend={handleSend}
+          colors={c}
+        />
       </ThemedView>
     </KeyboardAvoidingView>
   );
@@ -312,100 +345,115 @@ function MockChat({ convo, colors: c }: { convo: MockConvo; colors: (typeof Colo
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       style={{ flex: 1 }}>
       <ThemedView style={[styles.screen, { backgroundColor: c.background }]}>
-        <View style={[styles.header, { borderBottomColor: c.border, backgroundColor: c.background }]}>
-          <Pressable onPress={() => router.back()} hitSlop={12}>
-            <ThemedText style={styles.back}>‹</ThemedText>
-          </Pressable>
-          <View style={[styles.headerAvatar, { backgroundColor: c.subtle, borderColor: c.border }]}>
-            <ThemedText style={styles.headerAvatarText}>{convo.initials}</ThemedText>
-            {convo.online && <View style={[styles.onlineDot, { borderColor: c.background }]} />}
-          </View>
-          <View style={{ flex: 1 }}>
-            <ThemedText type="defaultSemiBold" style={styles.headerName}>
-              {convo.name}
-            </ThemedText>
-            <ThemedText style={[styles.headerContext, { color: c.textSecondary }]}>
-              {convo.context}
-            </ThemedText>
-          </View>
-        </View>
+        <Header
+          colors={c}
+          name={convo.name}
+          context={convo.context}
+          initials={convo.initials}
+          online={convo.online}
+        />
 
         <ScrollView
           ref={scrollRef}
           contentContainerStyle={styles.messages}
           showsVerticalScrollIndicator={false}>
-          {messages.map((m, i) => (
-            <View key={i}>
-              <View style={[styles.bubbleRow, m.from === 'me' && styles.bubbleRowRight]}>
-                <View
-                  style={[
-                    styles.bubble,
-                    m.from === 'me'
-                      ? { backgroundColor: c.tint, borderTopRightRadius: 4 }
-                      : { backgroundColor: c.subtle, borderTopLeftRadius: 4 },
-                  ]}>
+          {messages.map((m, i) => {
+            const isMine = m.from === 'me';
+            return (
+              <View key={i}>
+                {m.time ? (
                   <ThemedText
-                    style={[
-                      styles.bubbleText,
-                      { color: m.from === 'me' ? c.background : c.text },
-                    ]}>
-                    {m.text}
+                    style={[styles.clusterStamp, { color: c.textMuted }]}
+                    type="mono">
+                    {m.time}
                   </ThemedText>
+                ) : null}
+                <View style={[styles.bubbleRow, isMine && styles.bubbleRowRight]}>
+                  <View
+                    style={[
+                      styles.bubble,
+                      isMine
+                        ? { backgroundColor: c.tint, borderBottomRightRadius: 4 }
+                        : { backgroundColor: c.subtle, borderBottomLeftRadius: 4 },
+                    ]}>
+                    <ThemedText
+                      style={[
+                        styles.bubbleText,
+                        { color: isMine ? c.background : c.text },
+                      ]}>
+                      {m.text}
+                    </ThemedText>
+                  </View>
                 </View>
               </View>
-              {m.time && (
-                <ThemedText
-                  style={[
-                    styles.timeText,
-                    { color: c.textSecondary },
-                    m.from === 'me' && styles.timeTextRight,
-                  ]}>
-                  {m.time}
-                </ThemedText>
-              )}
-            </View>
-          ))}
+            );
+          })}
         </ScrollView>
 
-        <View style={[styles.inputBar, { borderTopColor: c.border, backgroundColor: c.background }]}>
-          <TextInput
-            value={draft}
-            onChangeText={setDraft}
-            onSubmitEditing={handleSend}
-            placeholder="Message..."
-            placeholderTextColor={c.textSecondary}
-            returnKeyType="send"
-            blurOnSubmit={false}
-            style={[styles.input, { color: c.text, backgroundColor: c.subtle, borderColor: c.border }]}
-          />
-          <Pressable
-            onPress={handleSend}
-            disabled={!draft.trim()}
-            style={({ pressed }) => [
-              styles.sendBtn,
-              {
-                backgroundColor: draft.trim() ? c.tint : c.subtle,
-                opacity: pressed ? 0.7 : 1,
-              },
-            ]}>
-            <ThemedText
-              style={[
-                styles.sendText,
-                { color: draft.trim() ? c.background : c.textSecondary },
-              ]}>
-              Send
-            </ThemedText>
-          </Pressable>
-        </View>
+        <InputBar
+          draft={draft}
+          setDraft={setDraft}
+          onSend={handleSend}
+          colors={c}
+        />
       </ThemedView>
     </KeyboardAvoidingView>
   );
 }
 
+function InputBar({
+  draft,
+  setDraft,
+  onSend,
+  colors: c,
+}: {
+  draft: string;
+  setDraft: (v: string) => void;
+  onSend: () => void;
+  colors: (typeof Colors)['light'];
+}) {
+  const canSend = draft.trim().length > 0;
+  return (
+    <View
+      style={[
+        styles.inputBar,
+        { borderTopColor: c.border, backgroundColor: c.background },
+      ]}>
+      <View style={[styles.inputWrap, { backgroundColor: c.subtle, borderColor: c.border }]}>
+        <TextInput
+          value={draft}
+          onChangeText={setDraft}
+          onSubmitEditing={onSend}
+          placeholder="Message…"
+          placeholderTextColor={c.textMuted}
+          returnKeyType="send"
+          blurOnSubmit={false}
+          style={[styles.input, { color: c.text }]}
+        />
+      </View>
+      <Pressable
+        onPress={onSend}
+        disabled={!canSend}
+        hitSlop={6}
+        style={({ pressed }) => [
+          styles.sendBtn,
+          {
+            backgroundColor: canSend ? c.tint : c.subtle,
+            opacity: pressed ? 0.7 : 1,
+          },
+        ]}>
+        <IconSymbol
+          name="arrow.up"
+          size={18}
+          color={canSend ? c.background : c.textMuted}
+        />
+      </Pressable>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-  },
+  screen: { flex: 1 },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -415,106 +463,106 @@ const styles = StyleSheet.create({
     paddingBottom: 14,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  back: {
-    fontSize: 32,
-    fontWeight: '300',
-    width: 24,
-    lineHeight: 32,
+  backBtn: {
+    width: 28,
+    height: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   headerAvatar: {
     width: 38,
     height: 38,
     borderRadius: 19,
-    borderWidth: 1,
+    borderWidth: StyleSheet.hairlineWidth,
     alignItems: 'center',
     justifyContent: 'center',
   },
   headerAvatarText: {
     fontSize: 12,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   onlineDot: {
     position: 'absolute',
     bottom: -1,
     right: -1,
-    width: 9,
-    height: 9,
-    borderRadius: 4.5,
-    backgroundColor: '#111827',
+    width: 10,
+    height: 10,
+    borderRadius: 5,
     borderWidth: 2,
   },
   headerName: {
     fontSize: 15,
+    fontWeight: '700',
+    letterSpacing: -0.2,
   },
   headerContext: {
-    fontSize: 12,
-    marginTop: 1,
+    fontSize: 10,
+    letterSpacing: 0.4,
+    marginTop: 2,
   },
   messages: {
     paddingHorizontal: 16,
     paddingVertical: 16,
-    gap: 4,
+    gap: 2,
   },
   loadingHint: {
-    fontSize: 13,
+    fontSize: 10,
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
     textAlign: 'center',
     paddingTop: 40,
+  },
+  clusterStamp: {
+    fontSize: 10,
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
+    textAlign: 'center',
+    paddingTop: 16,
+    paddingBottom: 6,
   },
   bubbleRow: {
     flexDirection: 'row',
     justifyContent: 'flex-start',
-    marginBottom: 4,
+    marginBottom: 3,
   },
-  bubbleRowRight: {
-    justifyContent: 'flex-end',
-  },
+  bubbleRowRight: { justifyContent: 'flex-end' },
   bubble: {
     maxWidth: '78%',
     paddingHorizontal: 14,
     paddingVertical: 10,
-    borderRadius: 12,
+    borderRadius: 18,
   },
   bubbleText: {
     fontSize: 15,
     lineHeight: 20,
   },
-  timeText: {
-    fontSize: 11,
-    textAlign: 'left',
-    marginVertical: 6,
-    marginLeft: 4,
-  },
-  timeTextRight: {
-    textAlign: 'right',
-    marginRight: 4,
-    marginLeft: 0,
-  },
   inputBar: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-end',
     gap: 10,
-    paddingHorizontal: 16,
+    paddingHorizontal: 14,
     paddingTop: 10,
     paddingBottom: 24,
     borderTopWidth: StyleSheet.hairlineWidth,
   },
-  input: {
+  inputWrap: {
     flex: 1,
+    borderRadius: 22,
+    borderWidth: StyleSheet.hairlineWidth,
     paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 4,
-    borderWidth: 1,
-    fontSize: 14,
-    fontFamily: Fonts?.mono,
+    paddingVertical: 6,
+    maxHeight: 120,
+  },
+  input: {
+    fontSize: 15,
+    paddingVertical: 6,
   },
   sendBtn: {
-    paddingHorizontal: 18,
-    paddingVertical: 10,
-    borderRadius: 4,
-  },
-  sendText: {
-    fontSize: 14,
-    fontWeight: '600',
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   emptyBlock: {
     flex: 1,
@@ -523,6 +571,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 32,
     gap: 10,
   },
-  emptyHeading: { fontSize: 20 },
+  emptyHeading: {
+    fontSize: 22,
+    fontWeight: '800',
+    letterSpacing: -0.4,
+  },
   emptyBody: { fontSize: 14, textAlign: 'center', lineHeight: 20 },
 });

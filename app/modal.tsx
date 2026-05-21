@@ -46,7 +46,9 @@ export default function MeModal() {
   if (!session || !profile) {
     return (
       <ThemedView style={[styles.screen, { backgroundColor: c.background }]}>
-        <ThemedText style={{ color: c.textSecondary }}>Not signed in.</ThemedText>
+        <View style={styles.notSignedIn}>
+          <ThemedText style={{ color: c.textSecondary }}>Not signed in.</ThemedText>
+        </View>
       </ThemedView>
     );
   }
@@ -69,15 +71,27 @@ export default function MeModal() {
         showsVerticalScrollIndicator={false}>
         <View style={styles.brandRow}>
           <NamePlaque size="sm" />
+          <Pressable
+            onPress={() => router.back()}
+            hitSlop={10}
+            style={({ pressed }) => [styles.closeBtn, { opacity: pressed ? 0.5 : 1 }]}>
+            <ThemedText style={[styles.closeText, { color: c.textMuted }]} type="mono">
+              close
+            </ThemedText>
+          </Pressable>
         </View>
 
         <View style={styles.profileBlock}>
-          <View style={[styles.avatar, { backgroundColor: c.subtle, borderColor: c.border }]}>
+          <View
+            style={[
+              styles.avatar,
+              { backgroundColor: c.subtle, borderColor: c.borderStrong },
+            ]}>
             <ThemedText style={[styles.avatarText, { color: c.text }]}>
               {profile.initials || '?'}
             </ThemedText>
           </View>
-          <ThemedText type="title" style={styles.name}>
+          <ThemedText style={[styles.name, { color: c.text }]}>
             {profile.display_name || 'No name yet'}
           </ThemedText>
           {subline ? (
@@ -85,15 +99,15 @@ export default function MeModal() {
               {subline}
             </ThemedText>
           ) : null}
-          <ThemedText style={[styles.email, { color: c.textSecondary }]}>
+          <ThemedText style={[styles.email, { color: c.textMuted }]} type="mono">
             {session.user.email}
           </ThemedText>
         </View>
 
         {profile.bio ? (
           <View style={[styles.section, { borderTopColor: c.border }]}>
-            <ThemedText style={[styles.sectionLabel, { color: c.textSecondary }]}>
-              About
+            <ThemedText style={[styles.sectionLabel, { color: c.textMuted }]} type="mono">
+              about
             </ThemedText>
             <ThemedText style={[styles.bio, { color: c.text }]}>{profile.bio}</ThemedText>
           </View>
@@ -101,8 +115,8 @@ export default function MeModal() {
 
         {profile.links.length > 0 ? (
           <View style={[styles.section, { borderTopColor: c.border }]}>
-            <ThemedText style={[styles.sectionLabel, { color: c.textSecondary }]}>
-              Links
+            <ThemedText style={[styles.sectionLabel, { color: c.textMuted }]} type="mono">
+              links
             </ThemedText>
             <View style={styles.linksList}>
               {profile.links.map((l: ProfileLink, i: number) => (
@@ -112,20 +126,19 @@ export default function MeModal() {
                   style={({ pressed }) => [
                     styles.linkRow,
                     {
-                      backgroundColor: pressed ? c.subtle : 'transparent',
-                      borderColor: c.border,
+                      borderBottomColor: c.border,
+                      opacity: pressed ? 0.5 : 1,
                     },
                   ]}>
                   <ThemedText style={styles.linkEmoji}>{linkEmoji(l.label, l.url)}</ThemedText>
                   <View style={styles.linkText}>
-                    <ThemedText
-                      type="defaultSemiBold"
-                      style={[styles.linkLabel, { color: c.text }]}>
+                    <ThemedText style={[styles.linkLabel, { color: c.text }]}>
                       {l.label}
                     </ThemedText>
                     <ThemedText
                       numberOfLines={1}
-                      style={[styles.linkUrl, { color: c.textSecondary }]}>
+                      style={[styles.linkUrl, { color: c.textMuted }]}
+                      type="mono">
                       {l.url.replace(/^https?:\/\//i, '')}
                     </ThemedText>
                   </View>
@@ -137,10 +150,10 @@ export default function MeModal() {
 
         <View style={[styles.section, { borderTopColor: c.border }]}>
           <View style={styles.historyHeader}>
-            <ThemedText style={[styles.sectionLabel, { color: c.textSecondary }]}>
-              Your posts
+            <ThemedText style={[styles.sectionLabel, { color: c.textMuted }]} type="mono">
+              your posts
             </ThemedText>
-            <ThemedText style={[styles.historyCount, { color: c.textSecondary }]}>
+            <ThemedText style={[styles.historyCount, { color: c.textMuted }]} type="mono">
               {totalPosts} total
             </ThemedText>
           </View>
@@ -153,8 +166,8 @@ export default function MeModal() {
           ) : (
             <View style={styles.historyList}>
               {myPosts.gigs.length > 0 && (
-                <ThemedText style={[styles.historyGroupLabel, { color: c.textSecondary }]}>
-                  Gigs
+                <ThemedText style={[styles.historyGroupLabel, { color: c.textMuted }]} type="mono">
+                  gigs · {myPosts.gigs.length}
                 </ThemedText>
               )}
               {myPosts.gigs.map((g) => (
@@ -162,8 +175,8 @@ export default function MeModal() {
               ))}
 
               {myPosts.hangouts.length > 0 && (
-                <ThemedText style={[styles.historyGroupLabel, { color: c.textSecondary }]}>
-                  Hangouts
+                <ThemedText style={[styles.historyGroupLabel, { color: c.textMuted }]} type="mono">
+                  hangouts · {myPosts.hangouts.length}
                 </ThemedText>
               )}
               {myPosts.hangouts.map((h) => (
@@ -171,8 +184,8 @@ export default function MeModal() {
               ))}
 
               {myPosts.voices.length > 0 && (
-                <ThemedText style={[styles.historyGroupLabel, { color: c.textSecondary }]}>
-                  Voices
+                <ThemedText style={[styles.historyGroupLabel, { color: c.textMuted }]} type="mono">
+                  voices · {myPosts.voices.length}
                 </ThemedText>
               )}
               {myPosts.voices.map((v) => (
@@ -183,229 +196,242 @@ export default function MeModal() {
         </View>
 
         <View style={styles.actions}>
-          <ActionButton
-            label="Edit profile"
+          <Pressable
             onPress={() => router.push('/profile-setup')}
-            colors={c}
-          />
-          <ActionButton
-            label="Sign out"
+            style={({ pressed }) => [
+              styles.primaryAction,
+              { backgroundColor: c.tint, opacity: pressed ? 0.85 : 1 },
+            ]}>
+            <ThemedText style={[styles.primaryActionText, { color: c.background }]}>
+              Edit profile
+            </ThemedText>
+          </Pressable>
+          <Pressable
             onPress={handleSignOut}
-            colors={c}
-            destructive
-          />
+            style={({ pressed }) => [styles.signOutBtn, { opacity: pressed ? 0.5 : 1 }]}>
+            <ThemedText style={[styles.signOutText, { color: c.danger }]} type="mono">
+              sign out
+            </ThemedText>
+          </Pressable>
         </View>
       </ScrollView>
     </ThemedView>
   );
 }
 
-function AnonChip({ colors }: { colors: (typeof Colors)['light'] }) {
+function AnonTag({ colors }: { colors: (typeof Colors)['light'] }) {
   return (
-    <View style={[styles.anonChip, { backgroundColor: colors.subtle, borderColor: colors.border }]}>
-      <ThemedText style={[styles.anonChipText, { color: colors.textSecondary }]}>
-        posted anonymously
-      </ThemedText>
-    </View>
+    <ThemedText style={[styles.anonTag, { color: colors.textMuted }]} type="mono">
+      · anonymous
+    </ThemedText>
   );
 }
 
 function GigHistoryRow({ gig, c }: { gig: Gig; c: (typeof Colors)['light'] }) {
   return (
-    <View style={[styles.histRow, { borderColor: c.border, backgroundColor: c.card }]}>
+    <View style={[styles.histRow, { borderBottomColor: c.border }]}>
       <View style={styles.histTop}>
-        <ThemedText type="defaultSemiBold" style={[styles.histTitle, { color: c.text }]} numberOfLines={1}>
+        <ThemedText style={[styles.histTitle, { color: c.text }]} numberOfLines={1}>
           {gig.title}
         </ThemedText>
-        <ThemedText type="defaultSemiBold" style={[styles.histPayout, { color: c.text }]}>
+        <ThemedText style={[styles.histPayout, { color: c.text }]}>
           {gig.payout}
         </ThemedText>
       </View>
-      <ThemedText style={[styles.histMeta, { color: c.textSecondary }]} numberOfLines={1}>
-        {gig.category} · {gig.where} · {gig.postedAgo}
+      <ThemedText style={[styles.histMeta, { color: c.textMuted }]} numberOfLines={1} type="mono">
+        {gig.category.toLowerCase()} · {gig.where.toLowerCase()} · {gig.postedAgo}
+        {gig.anonymous ? ' · anonymous' : ''}
       </ThemedText>
-      {gig.anonymous && <AnonChip colors={c} />}
     </View>
   );
 }
 
 function HangoutHistoryRow({ hangout, c }: { hangout: Hangout; c: (typeof Colors)['light'] }) {
   return (
-    <View style={[styles.histRow, { borderColor: c.border, backgroundColor: c.card }]}>
-      <ThemedText type="defaultSemiBold" style={[styles.histTitle, { color: c.text }]} numberOfLines={1}>
+    <View style={[styles.histRow, { borderBottomColor: c.border }]}>
+      <ThemedText style={[styles.histTitle, { color: c.text }]} numberOfLines={1}>
         {hangout.title}
       </ThemedText>
-      <ThemedText style={[styles.histMeta, { color: c.textSecondary }]} numberOfLines={1}>
-        {hangout.vibe} · {hangout.when} · {hangout.going} going
+      <ThemedText style={[styles.histMeta, { color: c.textMuted }]} numberOfLines={1} type="mono">
+        {hangout.vibe.toLowerCase()} · {hangout.when.toLowerCase()} · {hangout.going} going
+        {hangout.anonymous ? ' · anonymous' : ''}
       </ThemedText>
-      {hangout.anonymous && <AnonChip colors={c} />}
     </View>
   );
 }
 
 function VoiceHistoryRow({ voice, c }: { voice: Voice; c: (typeof Colors)['light'] }) {
   return (
-    <View style={[styles.histRow, { borderColor: c.border, backgroundColor: c.card }]}>
+    <View style={[styles.histRow, { borderBottomColor: c.border }]}>
       <View style={styles.histTop}>
-        <View style={[styles.voiceTopicTag, { backgroundColor: c.subtle }]}>
-          <ThemedText style={styles.voiceTopicEmoji}>{VOICE_TOPIC_EMOJI[voice.topic]}</ThemedText>
-          <ThemedText style={[styles.voiceTopicText, { color: c.textSecondary }]}>
-            {voice.topic}
-          </ThemedText>
-        </View>
-        <ThemedText style={[styles.histMeta, { color: c.textSecondary }]}>
+        <ThemedText style={[styles.voiceTopicLabel, { color: c.textMuted }]} type="mono">
+          {VOICE_TOPIC_EMOJI[voice.topic]} {voice.topic.toLowerCase()}
+        </ThemedText>
+        <ThemedText
+          style={[
+            styles.voiceVotes,
+            { color: voice.votes > 0 ? c.accent : c.textMuted },
+          ]}
+          type="mono">
           {voice.votes >= 0 ? `+${voice.votes}` : voice.votes}
         </ThemedText>
       </View>
       <ThemedText style={[styles.voiceBody, { color: c.text }]} numberOfLines={3}>
         {voice.body}
       </ThemedText>
-      {voice.anonymous && <AnonChip colors={c} />}
+      {voice.anonymous ? <AnonTag colors={c} /> : null}
     </View>
-  );
-}
-
-function ActionButton({
-  label,
-  onPress,
-  colors,
-  destructive,
-}: {
-  label: string;
-  onPress: () => void;
-  colors: (typeof Colors)['light'];
-  destructive?: boolean;
-}) {
-  return (
-    <Pressable
-      onPress={onPress}
-      style={({ pressed }) => [
-        styles.actionBtn,
-        {
-          backgroundColor: pressed ? colors.subtle : colors.card,
-          borderColor: colors.border,
-        },
-      ]}>
-      <ThemedText style={{ color: destructive ? '#dc2626' : colors.text, fontSize: 16 }}>
-        {label}
-      </ThemedText>
-    </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
   scroll: {
-    paddingTop: 16,
-    paddingHorizontal: 24,
-    paddingBottom: 40,
-    gap: 22,
-  },
-  brandRow: {
-    alignItems: 'flex-start',
-  },
-  profileBlock: { alignItems: 'center', gap: 8, paddingTop: 4 },
-  avatar: {
-    width: 84,
-    height: 84,
-    borderRadius: 42,
-    borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 6,
-  },
-  avatarText: { fontSize: 28, fontWeight: '600' },
-  name: { fontSize: 22, lineHeight: 28 },
-  subline: { fontSize: 14 },
-  email: { fontSize: 13, marginTop: 2 },
-  section: {
     paddingTop: 20,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    gap: 10,
+    paddingHorizontal: 24,
+    paddingBottom: 48,
+    gap: 28,
   },
-  sectionLabel: {
-    fontSize: 11,
-    letterSpacing: 0.5,
+  notSignedIn: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
+  brandRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  closeBtn: { paddingVertical: 4, paddingHorizontal: 4 },
+  closeText: {
+    fontSize: 10,
+    letterSpacing: 1.2,
     textTransform: 'uppercase',
   },
+  profileBlock: { alignItems: 'center', gap: 6, paddingTop: 12 },
+  avatar: {
+    width: 88,
+    height: 88,
+    borderRadius: 44,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 10,
+  },
+  avatarText: { fontSize: 28, fontWeight: '700' },
+  name: {
+    fontSize: 26,
+    fontWeight: '800',
+    letterSpacing: -0.8,
+    lineHeight: 30,
+  },
+  subline: { fontSize: 14, marginTop: 2 },
+  email: {
+    fontSize: 10,
+    letterSpacing: 0.6,
+    marginTop: 4,
+  },
+  section: {
+    paddingTop: 22,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    gap: 14,
+  },
+  sectionLabel: {
+    fontSize: 10,
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
+    fontWeight: '600',
+  },
   bio: { fontSize: 15, lineHeight: 22 },
-  linksList: { gap: 8 },
+  linksList: { gap: 0 },
   linkRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    borderWidth: 1,
-    borderRadius: 4,
+    paddingVertical: 14,
     gap: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
   linkEmoji: { fontSize: 18 },
-  linkText: { flex: 1, gap: 1 },
-  linkLabel: { fontSize: 14 },
-  linkUrl: { fontSize: 13 },
+  linkText: { flex: 1, gap: 2 },
+  linkLabel: { fontSize: 15, fontWeight: '600' },
+  linkUrl: {
+    fontSize: 11,
+    letterSpacing: 0.4,
+    flexShrink: 1,
+  },
   historyHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
-  historyCount: { fontSize: 11, letterSpacing: 0.3 },
-  emptyHint: { fontSize: 13, lineHeight: 19 },
-  historyList: { gap: 10 },
+  historyCount: {
+    fontSize: 10,
+    letterSpacing: 0.6,
+  },
+  emptyHint: { fontSize: 13, lineHeight: 20 },
+  historyList: { gap: 0 },
   historyGroupLabel: {
     fontSize: 10,
-    letterSpacing: 0.5,
+    letterSpacing: 1.2,
     textTransform: 'uppercase',
-    marginTop: 6,
+    fontWeight: '700',
+    marginTop: 14,
+    marginBottom: 4,
   },
   histRow: {
-    borderWidth: 1,
-    borderRadius: 4,
-    padding: 12,
-    gap: 6,
+    paddingVertical: 12,
+    gap: 4,
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
   histTop: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    gap: 8,
+    gap: 12,
   },
-  histTitle: { fontSize: 14, flex: 1 },
-  histPayout: { fontSize: 14 },
-  histMeta: { fontSize: 12 },
-  voiceTopicTag: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 2,
-  },
-  voiceTopicEmoji: { fontSize: 11 },
-  voiceTopicText: {
-    fontSize: 10,
+  histTitle: {
+    fontSize: 15,
     fontWeight: '600',
-    letterSpacing: 0.3,
-    textTransform: 'uppercase',
+    letterSpacing: -0.2,
+    flex: 1,
   },
-  voiceBody: { fontSize: 13, lineHeight: 19 },
-  anonChip: {
-    alignSelf: 'flex-start',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 2,
-    borderWidth: 1,
-    marginTop: 2,
+  histPayout: {
+    fontSize: 14,
+    fontWeight: '700',
   },
-  anonChipText: {
+  histMeta: {
     fontSize: 10,
-    letterSpacing: 0.3,
-    textTransform: 'uppercase',
+    letterSpacing: 0.4,
   },
-  actions: { gap: 10, marginTop: 4 },
-  actionBtn: {
-    paddingVertical: 14,
-    paddingHorizontal: 18,
-    borderRadius: 4,
-    borderWidth: 1,
+  voiceTopicLabel: {
+    fontSize: 10,
+    letterSpacing: 0.6,
+    fontWeight: '700',
+  },
+  voiceVotes: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.4,
+  },
+  voiceBody: { fontSize: 14, lineHeight: 20, marginTop: 2 },
+  anonTag: {
+    fontSize: 10,
+    letterSpacing: 0.4,
+    marginTop: 4,
+  },
+  actions: { gap: 14, marginTop: 8, alignItems: 'center' },
+  primaryAction: {
+    width: '100%',
+    paddingVertical: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  primaryActionText: {
+    fontSize: 15,
+    fontWeight: '700',
+    letterSpacing: 0.2,
+  },
+  signOutBtn: { paddingVertical: 6 },
+  signOutText: {
+    fontSize: 11,
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
+    fontWeight: '700',
   },
 });

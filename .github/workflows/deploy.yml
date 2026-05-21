@@ -24,7 +24,10 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # Supabase's realtime client constructs a WebSocket at module
+          # load; Node 20 doesn't have a native WebSocket, so SSR of any
+          # route that imports lib/supabase.ts crashes. Node 22 has it.
+          node-version: 22
           cache: npm
 
       - name: Install

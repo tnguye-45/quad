@@ -12,10 +12,19 @@ import {
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Colors, Fonts } from '@/constants/theme';
+import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useAuth } from '@/lib/auth-context';
 import { GIG_CATEGORIES, usePosts, type GigCategory } from '@/lib/posts-store';
+
+const CATEGORY_EMOJI: Record<GigCategory, string> = {
+  Tutoring: '📚',
+  Moving: '📦',
+  Rideshare: '🚗',
+  Pets: '🐾',
+  Creative: '🎨',
+  Errands: '🛒',
+};
 
 export default function PostGigScreen() {
   const c = Colors[useColorScheme() ?? 'light'];
@@ -79,8 +88,11 @@ export default function PostGigScreen() {
           contentContainerStyle={styles.scroll}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}>
-          <View style={styles.heroBlock}>
-            <ThemedText type="title" style={styles.heading}>
+          <View style={styles.hero}>
+            <ThemedText style={[styles.eyebrow, { color: c.accent }]} type="mono">
+              gigs · paid task
+            </ThemedText>
+            <ThemedText style={[styles.heading, { color: c.text }]}>
               Post a gig
             </ThemedText>
             <ThemedText style={[styles.tagline, { color: c.textSecondary }]}>
@@ -88,156 +100,157 @@ export default function PostGigScreen() {
             </ThemedText>
           </View>
 
-          <View style={styles.form}>
-            <Field
-              label="Title *"
+          <FieldGroup label="Title" colors={c}>
+            <TextInput
               value={title}
               onChangeText={setTitle}
-              placeholder="e.g. Help move a couch up 3 flights"
-              colors={c}
+              placeholder="Help move a couch up 3 flights"
+              placeholderTextColor={c.textMuted}
+              style={[styles.input, { color: c.text }]}
             />
+            <View style={[styles.underline, { backgroundColor: c.border }]} />
+          </FieldGroup>
 
-            <View style={styles.fieldGroup}>
-              <ThemedText style={[styles.fieldLabel, { color: c.textSecondary }]}>
-                Category *
-              </ThemedText>
-              <View style={styles.chipRow}>
-                {GIG_CATEGORIES.map((cat) => {
-                  const active = category === cat;
-                  return (
-                    <Pressable
-                      key={cat}
-                      onPress={() => setCategory(cat)}
+          <View style={styles.fieldGroup}>
+            <ThemedText style={[styles.label, { color: c.textMuted }]} type="mono">
+              category
+            </ThemedText>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.storyRow}>
+              {GIG_CATEGORIES.map((cat) => {
+                const active = category === cat;
+                return (
+                  <Pressable
+                    key={cat}
+                    onPress={() => setCategory(cat)}
+                    hitSlop={4}
+                    style={styles.story}>
+                    <View
                       style={[
-                        styles.chip,
+                        styles.storyBubble,
                         {
-                          backgroundColor: active ? c.tint : c.card,
-                          borderColor: active ? c.tint : c.border,
+                          borderColor: active ? c.accent : c.border,
+                          backgroundColor: active ? c.surface : c.background,
+                          borderWidth: active ? 2.5 : 1.5,
                         },
                       ]}>
-                      <ThemedText
-                        style={[
-                          styles.chipText,
-                          { color: active ? c.background : c.text },
-                        ]}>
-                        {cat}
+                      <ThemedText style={styles.storyEmoji}>
+                        {CATEGORY_EMOJI[cat]}
                       </ThemedText>
-                    </Pressable>
-                  );
-                })}
-              </View>
-            </View>
+                    </View>
+                    <ThemedText
+                      style={[
+                        styles.storyLabel,
+                        { color: active ? c.text : c.textSecondary },
+                        active && styles.storyLabelActive,
+                      ]}
+                      type="mono">
+                      {cat.toLowerCase()}
+                    </ThemedText>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          </View>
 
-            <View style={styles.row}>
-              <View style={[styles.fieldGroup, { flex: 1 }]}>
-                <ThemedText style={[styles.fieldLabel, { color: c.textSecondary }]}>
-                  Payout *
-                </ThemedText>
-                <View style={[styles.inputWithPrefix, { borderColor: c.border, backgroundColor: c.card }]}>
-                  <ThemedText style={[styles.prefix, { color: c.textSecondary }]}>$</ThemedText>
-                  <TextInput
-                    value={payout}
-                    onChangeText={setPayout}
-                    placeholder="40"
-                    placeholderTextColor={c.textSecondary}
-                    keyboardType="numeric"
-                    style={[styles.inputBare, { color: c.text }]}
-                  />
-                </View>
-              </View>
-              <View style={[styles.fieldGroup, { flex: 2 }]}>
-                <ThemedText style={[styles.fieldLabel, { color: c.textSecondary }]}>
-                  Where *
-                </ThemedText>
+          <View style={styles.row}>
+            <FieldGroup label="Payout" colors={c} style={{ flex: 1 }}>
+              <View style={styles.inputWithPrefix}>
+                <ThemedText style={[styles.prefix, { color: c.textMuted }]}>$</ThemedText>
                 <TextInput
-                  value={where}
-                  onChangeText={setWhere}
-                  placeholder="e.g. Dillon Hall"
-                  placeholderTextColor={c.textSecondary}
-                  style={[
-                    styles.input,
-                    { borderColor: c.border, color: c.text, backgroundColor: c.card },
-                  ]}
+                  value={payout}
+                  onChangeText={setPayout}
+                  placeholder="40"
+                  placeholderTextColor={c.textMuted}
+                  keyboardType="numeric"
+                  style={[styles.input, styles.inputBare, { color: c.text }]}
                 />
               </View>
-            </View>
-
-            <View style={styles.fieldGroup}>
-              <ThemedText style={[styles.fieldLabel, { color: c.textSecondary }]}>
-                Description
-              </ThemedText>
+              <View style={[styles.underline, { backgroundColor: c.border }]} />
+            </FieldGroup>
+            <FieldGroup label="Where" colors={c} style={{ flex: 2 }}>
               <TextInput
-                value={description}
-                onChangeText={setDescription}
-                placeholder="Anything else they should know?"
-                placeholderTextColor={c.textSecondary}
-                multiline
-                numberOfLines={3}
-                maxLength={400}
-                style={[
-                  styles.input,
-                  styles.descInput,
-                  { borderColor: c.border, color: c.text, backgroundColor: c.card },
-                ]}
+                value={where}
+                onChangeText={setWhere}
+                placeholder="Dillon Hall"
+                placeholderTextColor={c.textMuted}
+                style={[styles.input, { color: c.text }]}
               />
-            </View>
-
-            <PostAsToggle
-              anonymous={anonymous}
-              onChange={setAnonymous}
-              displayName={profile?.display_name ?? null}
-              initials={profile?.initials ?? null}
-              colors={c}
-            />
-
-            {err ? <ThemedText style={styles.error}>{err}</ThemedText> : null}
-
-            <Pressable
-              disabled={!canSubmit}
-              onPress={handleSubmit}
-              style={({ pressed }) => [
-                styles.cta,
-                {
-                  backgroundColor: c.tint,
-                  opacity: !canSubmit ? 0.4 : pressed ? 0.85 : 1,
-                },
-              ]}>
-              <ThemedText style={[styles.ctaText, { color: c.background }]}>
-                {busy ? 'Posting…' : 'Post'}
-              </ThemedText>
-            </Pressable>
-
-            <Pressable onPress={() => router.back()} style={styles.cancelBtn}>
-              <ThemedText style={[styles.cancelText, { color: c.textSecondary }]}>
-                Cancel
-              </ThemedText>
-            </Pressable>
+              <View style={[styles.underline, { backgroundColor: c.border }]} />
+            </FieldGroup>
           </View>
+
+          <FieldGroup label="Description" colors={c}>
+            <TextInput
+              value={description}
+              onChangeText={setDescription}
+              placeholder="Anything else they should know?"
+              placeholderTextColor={c.textMuted}
+              multiline
+              numberOfLines={3}
+              maxLength={400}
+              style={[styles.input, styles.descInput, { color: c.text }]}
+            />
+            <View style={[styles.underline, { backgroundColor: c.border }]} />
+          </FieldGroup>
+
+          <PostAsToggle
+            anonymous={anonymous}
+            onChange={setAnonymous}
+            displayName={profile?.display_name ?? null}
+            initials={profile?.initials ?? null}
+            colors={c}
+          />
+
+          {err ? (
+            <ThemedText style={[styles.error, { color: c.danger }]}>{err}</ThemedText>
+          ) : null}
+
+          <Pressable
+            disabled={!canSubmit}
+            onPress={handleSubmit}
+            style={({ pressed }) => [
+              styles.cta,
+              {
+                backgroundColor: c.tint,
+                opacity: !canSubmit ? 0.35 : pressed ? 0.85 : 1,
+              },
+            ]}>
+            <ThemedText style={[styles.ctaText, { color: c.background }]}>
+              {busy ? 'Posting…' : 'Post gig'}
+            </ThemedText>
+          </Pressable>
+
+          <Pressable onPress={() => router.back()} style={styles.cancelBtn}>
+            <ThemedText style={[styles.cancelText, { color: c.textMuted }]} type="mono">
+              cancel
+            </ThemedText>
+          </Pressable>
         </ScrollView>
       </ThemedView>
     </KeyboardAvoidingView>
   );
 }
 
-function Field({
+function FieldGroup({
   label,
+  children,
   colors,
-  ...rest
-}: React.ComponentProps<typeof TextInput> & {
+  style,
+}: {
   label: string;
+  children: React.ReactNode;
   colors: (typeof Colors)['light'];
+  style?: object;
 }) {
   return (
-    <View style={styles.fieldGroup}>
-      <ThemedText style={[styles.fieldLabel, { color: colors.textSecondary }]}>{label}</ThemedText>
-      <TextInput
-        {...rest}
-        placeholderTextColor={colors.textSecondary}
-        style={[
-          styles.input,
-          { borderColor: colors.border, color: colors.text, backgroundColor: colors.card },
-        ]}
-      />
+    <View style={[styles.fieldGroup, style]}>
+      <ThemedText style={[styles.label, { color: colors.textMuted }]} type="mono">
+        {label.toLowerCase()}
+      </ThemedText>
+      {children}
     </View>
   );
 }
@@ -255,14 +268,14 @@ export function PostAsToggle({
   initials: string | null;
   colors: (typeof Colors)['light'];
 }) {
-  const options = [
-    { value: false, label: 'Show my profile' },
-    { value: true, label: 'Post anonymously' },
+  const options: { value: boolean; label: string }[] = [
+    { value: false, label: 'My profile' },
+    { value: true, label: 'Anonymous' },
   ];
   return (
     <View style={styles.fieldGroup}>
-      <ThemedText style={[styles.fieldLabel, { color: colors.textSecondary }]}>
-        Post as
+      <ThemedText style={[styles.label, { color: colors.textMuted }]} type="mono">
+        post as
       </ThemedText>
       <View style={styles.segmentRow}>
         {options.map((opt) => {
@@ -271,43 +284,45 @@ export function PostAsToggle({
             <Pressable
               key={opt.label}
               onPress={() => onChange(opt.value)}
-              style={[
-                styles.segment,
-                {
-                  backgroundColor: active ? colors.tint : colors.card,
-                  borderColor: active ? colors.tint : colors.border,
-                },
-              ]}>
+              style={styles.segment}>
               <ThemedText
                 style={[
                   styles.segmentText,
-                  { color: active ? colors.background : colors.text },
+                  { color: active ? colors.text : colors.textMuted },
+                  active && { fontWeight: '700' },
                 ]}>
                 {opt.label}
               </ThemedText>
+              <View
+                style={[
+                  styles.segmentUnderline,
+                  {
+                    backgroundColor: active ? colors.accent : 'transparent',
+                  },
+                ]}
+              />
             </Pressable>
           );
         })}
       </View>
-      <View
-        style={[
-          styles.previewRow,
-          { backgroundColor: colors.subtle, borderColor: colors.border },
-        ]}>
+      <View style={[styles.previewRow, { borderColor: colors.border }]}>
         <View
-          style={[styles.previewAvatar, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          style={[
+            styles.previewAvatar,
+            { borderColor: colors.border, backgroundColor: colors.subtle },
+          ]}>
           <ThemedText style={[styles.previewAvatarText, { color: colors.text }]}>
-            {anonymous ? '??' : initials || '??'}
+            {anonymous ? '?' : initials || '?'}
           </ThemedText>
         </View>
         <View style={{ flex: 1 }}>
-          <ThemedText type="defaultSemiBold" style={{ color: colors.text, fontSize: 13 }}>
-            {anonymous ? 'Anonymous' : displayName || 'No profile yet'}
+          <ThemedText style={[styles.previewName, { color: colors.text }]}>
+            {anonymous ? 'Anonymous' : displayName || 'Set up your profile'}
           </ThemedText>
-          <ThemedText style={{ color: colors.textSecondary, fontSize: 12 }}>
-            {anonymous
-              ? 'Other students will not see your name.'
-              : 'This is how your post will appear.'}
+          <ThemedText
+            style={[styles.previewHint, { color: colors.textMuted }]}
+            type="mono">
+            {anonymous ? 'no name shown on this post' : 'shown to other students'}
           </ThemedText>
         </View>
       </View>
@@ -318,99 +333,136 @@ export function PostAsToggle({
 const styles = StyleSheet.create({
   screen: { flex: 1 },
   scroll: {
-    paddingTop: 24,
-    paddingBottom: 40,
+    paddingTop: 16,
+    paddingBottom: 56,
     paddingHorizontal: 24,
     gap: 24,
   },
-  heroBlock: { gap: 8 },
-  heading: { fontSize: 24, lineHeight: 30 },
-  tagline: { fontSize: 14, lineHeight: 20 },
-  form: { gap: 18 },
-  fieldGroup: { gap: 6 },
-  fieldLabel: { fontSize: 12, letterSpacing: 0.3, textTransform: 'uppercase' },
-  input: {
-    borderWidth: 1,
-    borderRadius: 4,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
+  hero: { gap: 6 },
+  eyebrow: {
+    fontSize: 10,
+    letterSpacing: 1.4,
+    textTransform: 'uppercase',
+    fontWeight: '700',
+  },
+  heading: {
+    fontSize: 30,
+    fontWeight: '800',
+    letterSpacing: -0.8,
+    lineHeight: 34,
+  },
+  tagline: {
     fontSize: 14,
-    fontFamily: Fonts?.mono,
+    lineHeight: 20,
+    marginTop: 4,
+  },
+  fieldGroup: { gap: 10 },
+  label: {
+    fontSize: 10,
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
+    fontWeight: '600',
+  },
+  input: {
+    fontSize: 17,
+    paddingVertical: 8,
+    paddingHorizontal: 0,
   },
   inputWithPrefix: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderWidth: 1,
-    borderRadius: 4,
-    paddingHorizontal: 14,
   },
-  inputBare: {
-    flex: 1,
-    paddingVertical: 12,
-    fontSize: 14,
-    fontFamily: Fonts?.mono,
-  },
+  inputBare: { flex: 1 },
   prefix: {
-    fontSize: 14,
+    fontSize: 17,
     marginRight: 4,
-    fontFamily: Fonts?.mono,
+  },
+  underline: {
+    height: StyleSheet.hairlineWidth,
   },
   descInput: {
-    minHeight: 84,
+    minHeight: 80,
     textAlignVertical: 'top',
-    paddingTop: 12,
+    paddingTop: 8,
   },
-  row: { flexDirection: 'row', gap: 12 },
-  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4 },
-  chip: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 4,
-    borderWidth: 1,
+  storyRow: {
+    paddingTop: 4,
+    paddingBottom: 4,
+    gap: 14,
   },
-  chipText: { fontSize: 13, fontWeight: '500' },
+  story: {
+    alignItems: 'center',
+    gap: 6,
+    width: 64,
+  },
+  storyBubble: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  storyEmoji: { fontSize: 22 },
+  storyLabel: {
+    fontSize: 10,
+    letterSpacing: 0.3,
+    textTransform: 'lowercase',
+  },
+  storyLabelActive: { fontWeight: '700' },
+  row: { flexDirection: 'row', gap: 24 },
   segmentRow: {
     flexDirection: 'row',
-    gap: 8,
-    marginTop: 4,
+    gap: 24,
   },
   segment: {
-    flex: 1,
-    paddingVertical: 10,
-    borderRadius: 4,
-    borderWidth: 1,
-    alignItems: 'center',
+    paddingVertical: 6,
+    gap: 6,
   },
   segmentText: {
-    fontSize: 13,
-    fontWeight: '500',
+    fontSize: 14,
+  },
+  segmentUnderline: {
+    height: 2,
+    width: '100%',
+    borderRadius: 1,
   },
   previewRow: {
     marginTop: 8,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    padding: 10,
-    borderRadius: 4,
-    borderWidth: 1,
+    gap: 12,
+    paddingVertical: 12,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
   previewAvatar: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    borderWidth: 1,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    borderWidth: StyleSheet.hairlineWidth,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  previewAvatarText: { fontSize: 11, fontWeight: '600' },
-  error: { fontSize: 14, lineHeight: 20, color: '#dc2626' },
+  previewAvatarText: { fontSize: 13, fontWeight: '700' },
+  previewName: { fontSize: 14, fontWeight: '600' },
+  previewHint: {
+    fontSize: 10,
+    letterSpacing: 0.3,
+    marginTop: 2,
+    textTransform: 'lowercase',
+  },
+  error: { fontSize: 13, lineHeight: 18 },
   cta: {
     marginTop: 8,
     paddingVertical: 16,
-    borderRadius: 4,
+    borderRadius: 12,
     alignItems: 'center',
   },
-  ctaText: { fontSize: 16, fontWeight: '600' },
-  cancelBtn: { paddingVertical: 12, alignItems: 'center' },
-  cancelText: { fontSize: 14 },
+  ctaText: { fontSize: 15, fontWeight: '700', letterSpacing: 0.2 },
+  cancelBtn: { paddingVertical: 8, alignItems: 'center' },
+  cancelText: {
+    fontSize: 11,
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
+  },
 });

@@ -9,7 +9,16 @@ import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useAuth } from '@/lib/auth-context';
 import { findOrCreateGigConversation } from '@/lib/messaging';
-import { usePosts } from '@/lib/posts-store';
+import { usePosts, type GigCategory } from '@/lib/posts-store';
+
+const CATEGORY_EMOJI: Record<GigCategory, string> = {
+  Tutoring: '📚',
+  Moving: '📦',
+  Rideshare: '🚗',
+  Pets: '🐾',
+  Creative: '🎨',
+  Errands: '🛒',
+};
 
 export default function GigDetailScreen() {
   const c = Colors[useColorScheme() ?? 'light'];
@@ -25,17 +34,20 @@ export default function GigDetailScreen() {
     return (
       <ThemedView style={[styles.screen, { backgroundColor: c.background }]}>
         <View style={styles.emptyBlock}>
-          <ThemedText type="title" style={styles.emptyHeading}>
+          <ThemedText style={[styles.emptyEyebrow, { color: c.textMuted }]} type="mono">
+            404 · gone
+          </ThemedText>
+          <ThemedText style={[styles.emptyHeading, { color: c.text }]}>
             Gig not found
           </ThemedText>
           <ThemedText style={[styles.emptyBody, { color: c.textSecondary }]}>
-            It may have been deleted or you opened a stale link.
+            It may have been deleted, or you opened a stale link.
           </ThemedText>
           <Pressable
             onPress={() => router.back()}
             style={({ pressed }) => [
               styles.cta,
-              { backgroundColor: c.tint, opacity: pressed ? 0.85 : 1 },
+              { backgroundColor: c.tint, opacity: pressed ? 0.85 : 1, marginTop: 16, alignSelf: 'stretch' },
             ]}>
             <ThemedText style={[styles.ctaText, { color: c.background }]}>Go back</ThemedText>
           </Pressable>
@@ -48,13 +60,13 @@ export default function GigDetailScreen() {
   const posterLabel =
     gig.anonymous || !gig.posterName ? 'Anonymous student' : gig.posterName;
   const posterInitials =
-    gig.anonymous || !gig.posterInitials ? '??' : gig.posterInitials;
+    gig.anonymous || !gig.posterInitials ? '?' : gig.posterInitials;
   const canMessage = !isOwn && !gig.anonymous && gig.ownerId !== 'seed';
+  const firstName = gig.posterName?.split(' ')[0] ?? 'poster';
 
   async function handleMessage() {
     if (!gig || !session) return;
     if (!realSession) {
-      // Dev mode — route to a mock thread keyed by the poster's first name.
       const key = (gig.posterName ?? '').split(' ')[0]?.toLowerCase() || 'marcus';
       router.replace(`/chat/${key}` as never);
       return;
@@ -84,106 +96,119 @@ export default function GigDetailScreen() {
       <ScrollView
         contentContainerStyle={styles.scroll}
         showsVerticalScrollIndicator={false}>
-        <View style={styles.topRow}>
-          <View style={[styles.catTag, { backgroundColor: c.subtle }]}>
-            <ThemedText style={[styles.catTagText, { color: c.textSecondary }]}>
-              {gig.category}
+        <View style={styles.hero}>
+          <View style={styles.eyebrowRow}>
+            <ThemedText style={styles.eyebrowEmoji}>
+              {CATEGORY_EMOJI[gig.category] ?? '✨'}
+            </ThemedText>
+            <ThemedText style={[styles.eyebrow, { color: c.accent }]} type="mono">
+              {gig.category.toLowerCase()} · {gig.postedAgo}
             </ThemedText>
           </View>
-          <ThemedText type="defaultSemiBold" style={[styles.payout, { color: c.text }]}>
-            {gig.payout}
+          <ThemedText style={[styles.heading, { color: c.text }]}>
+            {gig.title}
           </ThemedText>
         </View>
 
-        <ThemedText type="title" style={styles.heading}>
-          {gig.title}
-        </ThemedText>
-
-        <View style={styles.metaRow}>
-          <IconSymbol name="mappin.and.ellipse" size={14} color={c.textSecondary} />
-          <ThemedText style={[styles.metaText, { color: c.textSecondary }]}>
-            {gig.where}
-          </ThemedText>
+        <View style={[styles.posterRow, { borderTopColor: c.border, borderBottomColor: c.border }]}>
+          <View
+            style={[
+              styles.posterAvatar,
+              { backgroundColor: c.subtle, borderColor: c.borderStrong },
+            ]}>
+            <ThemedText style={[styles.posterAvatarText, { color: c.text }]}>
+              {posterInitials}
+            </ThemedText>
+          </View>
+          <View style={{ flex: 1 }}>
+            <ThemedText style={[styles.posterName, { color: c.text }]}>
+              {posterLabel}
+            </ThemedText>
+            <ThemedText style={[styles.posterHint, { color: c.textMuted }]} type="mono">
+              {gig.anonymous
+                ? 'posted anonymously'
+                : isOwn
+                  ? 'you posted this'
+                  : 'notre dame · verified'}
+            </ThemedText>
+          </View>
+          <View style={styles.payoutBlock}>
+            <ThemedText style={[styles.payoutLabel, { color: c.textMuted }]} type="mono">
+              payout
+            </ThemedText>
+            <ThemedText style={[styles.payoutValue, { color: c.text }]}>
+              {gig.payout}
+            </ThemedText>
+          </View>
         </View>
-        <View style={styles.metaRow}>
-          <IconSymbol name="clock.fill" size={14} color={c.textSecondary} />
-          <ThemedText style={[styles.metaText, { color: c.textSecondary }]}>
-            {gig.postedAgo}
-          </ThemedText>
+
+        <View style={styles.metaBlock}>
+          <View style={styles.metaRow}>
+            <IconSymbol name="mappin" size={14} color={c.textMuted} />
+            <ThemedText style={[styles.metaText, { color: c.text }]}>
+              {gig.where}
+            </ThemedText>
+          </View>
+          <View style={styles.metaRow}>
+            <IconSymbol name="clock" size={14} color={c.textMuted} />
+            <ThemedText style={[styles.metaText, { color: c.text }]}>
+              posted {gig.postedAgo}
+            </ThemedText>
+          </View>
         </View>
 
         {gig.description ? (
           <View style={[styles.section, { borderTopColor: c.border }]}>
-            <ThemedText style={[styles.sectionLabel, { color: c.textSecondary }]}>
-              Details
+            <ThemedText style={[styles.sectionLabel, { color: c.textMuted }]} type="mono">
+              details
             </ThemedText>
-            <ThemedText style={[styles.body, { color: c.text }]}>{gig.description}</ThemedText>
+            <ThemedText style={[styles.body, { color: c.text }]}>
+              {gig.description}
+            </ThemedText>
           </View>
         ) : null}
 
-        <View style={[styles.section, { borderTopColor: c.border }]}>
-          <ThemedText style={[styles.sectionLabel, { color: c.textSecondary }]}>
-            Posted by
-          </ThemedText>
-          <View style={styles.posterRow}>
-            <View style={[styles.posterAvatar, { backgroundColor: c.subtle, borderColor: c.border }]}>
-              <ThemedText style={[styles.posterAvatarText, { color: c.text }]}>
-                {posterInitials}
+        <View style={styles.ctaBlock}>
+          {canMessage ? (
+            <Pressable
+              onPress={handleMessage}
+              disabled={busy}
+              style={({ pressed }) => [
+                styles.cta,
+                { backgroundColor: c.tint, opacity: busy ? 0.5 : pressed ? 0.85 : 1 },
+              ]}>
+              <ThemedText style={[styles.ctaText, { color: c.background }]}>
+                {busy ? 'Opening…' : `Message ${firstName}`}
+              </ThemedText>
+            </Pressable>
+          ) : (
+            <View
+              style={[
+                styles.ctaDisabled,
+                { borderColor: c.border, backgroundColor: c.subtle },
+              ]}>
+              <ThemedText
+                style={[styles.ctaDisabledText, { color: c.textMuted }]}
+                type="mono">
+                {isOwn
+                  ? "you can't message yourself"
+                  : gig.anonymous
+                    ? 'anonymous · cannot reply'
+                    : 'demo gig · messaging off'}
               </ThemedText>
             </View>
-            <View style={{ flex: 1 }}>
-              <ThemedText type="defaultSemiBold" style={[styles.posterName, { color: c.text }]}>
-                {posterLabel}
-              </ThemedText>
-              {gig.anonymous && (
-                <ThemedText style={[styles.posterHint, { color: c.textSecondary }]}>
-                  This gig was posted anonymously.
-                </ThemedText>
-              )}
-              {isOwn && (
-                <ThemedText style={[styles.posterHint, { color: c.textSecondary }]}>
-                  You posted this.
-                </ThemedText>
-              )}
-            </View>
-          </View>
-        </View>
+          )}
 
-        {canMessage ? (
-          <Pressable
-            onPress={handleMessage}
-            disabled={busy}
-            style={({ pressed }) => [
-              styles.cta,
-              { backgroundColor: c.tint, opacity: busy ? 0.5 : pressed ? 0.85 : 1 },
-            ]}>
-            <ThemedText style={[styles.ctaText, { color: c.background }]}>
-              {busy ? 'Opening…' : `Message ${gig.posterName?.split(' ')[0] ?? 'poster'}`}
+          {err ? (
+            <ThemedText style={[styles.error, { color: c.danger }]}>{err}</ThemedText>
+          ) : null}
+
+          <Pressable onPress={() => router.back()} style={styles.cancelBtn}>
+            <ThemedText style={[styles.cancelText, { color: c.textMuted }]} type="mono">
+              close
             </ThemedText>
           </Pressable>
-        ) : (
-          <View
-            style={[
-              styles.ctaDisabled,
-              { backgroundColor: c.subtle, borderColor: c.border },
-            ]}>
-            <ThemedText style={[styles.ctaDisabledText, { color: c.textSecondary }]}>
-              {isOwn
-                ? "You can't message yourself"
-                : gig.anonymous
-                  ? 'Anonymous posters can be replied to only by future updates'
-                  : 'Demo gig — messaging not available'}
-            </ThemedText>
-          </View>
-        )}
-
-        {err ? <ThemedText style={styles.error}>{err}</ThemedText> : null}
-
-        <Pressable onPress={() => router.back()} style={styles.cancelBtn}>
-          <ThemedText style={[styles.cancelText, { color: c.textSecondary }]}>
-            Close
-          </ThemedText>
-        </Pressable>
+        </View>
       </ScrollView>
     </ThemedView>
   );
@@ -192,88 +217,142 @@ export default function GigDetailScreen() {
 const styles = StyleSheet.create({
   screen: { flex: 1 },
   scroll: {
-    paddingTop: 16,
-    paddingBottom: 40,
+    paddingTop: 20,
+    paddingBottom: 48,
     paddingHorizontal: 24,
-    gap: 14,
+    gap: 4,
   },
-  topRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+  hero: {
+    gap: 10,
+    paddingBottom: 18,
   },
-  catTag: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 2,
-  },
-  catTagText: {
-    fontSize: 11,
-    fontWeight: '600',
-    letterSpacing: 0.3,
-    textTransform: 'uppercase',
-  },
-  payout: { fontSize: 22 },
-  heading: { fontSize: 24, lineHeight: 30 },
-  metaRow: {
+  eyebrowRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
   },
-  metaText: { fontSize: 14 },
-  section: {
-    paddingTop: 16,
-    marginTop: 4,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    gap: 8,
-  },
-  sectionLabel: {
-    fontSize: 11,
-    letterSpacing: 0.5,
+  eyebrowEmoji: { fontSize: 16 },
+  eyebrow: {
+    fontSize: 10,
+    letterSpacing: 1.4,
     textTransform: 'uppercase',
+    fontWeight: '700',
   },
-  body: { fontSize: 15, lineHeight: 22 },
+  heading: {
+    fontSize: 28,
+    fontWeight: '800',
+    letterSpacing: -0.6,
+    lineHeight: 34,
+  },
   posterRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
+    paddingVertical: 16,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
   posterAvatar: {
     width: 44,
     height: 44,
     borderRadius: 22,
-    borderWidth: 1,
+    borderWidth: StyleSheet.hairlineWidth,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  posterAvatarText: { fontSize: 14, fontWeight: '600' },
-  posterName: { fontSize: 15 },
-  posterHint: { fontSize: 12, marginTop: 2 },
-  cta: {
-    marginTop: 12,
+  posterAvatarText: { fontSize: 14, fontWeight: '700' },
+  posterName: { fontSize: 15, fontWeight: '700' },
+  posterHint: {
+    fontSize: 10,
+    letterSpacing: 0.3,
+    marginTop: 2,
+    textTransform: 'lowercase',
+  },
+  payoutBlock: {
+    alignItems: 'flex-end',
+    gap: 2,
+  },
+  payoutLabel: {
+    fontSize: 9,
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
+    fontWeight: '600',
+  },
+  payoutValue: {
+    fontSize: 22,
+    fontWeight: '800',
+    letterSpacing: -0.4,
+  },
+  metaBlock: {
     paddingVertical: 16,
-    borderRadius: 4,
+    gap: 8,
+  },
+  metaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  metaText: {
+    fontSize: 14,
+  },
+  section: {
+    paddingTop: 16,
+    paddingBottom: 8,
+    gap: 8,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  sectionLabel: {
+    fontSize: 10,
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
+    fontWeight: '600',
+  },
+  body: { fontSize: 15, lineHeight: 22 },
+  ctaBlock: {
+    marginTop: 28,
+    gap: 14,
+  },
+  cta: {
+    paddingVertical: 16,
+    borderRadius: 12,
     alignItems: 'center',
   },
-  ctaText: { fontSize: 16, fontWeight: '600' },
+  ctaText: { fontSize: 15, fontWeight: '700', letterSpacing: 0.2 },
   ctaDisabled: {
-    marginTop: 12,
     paddingVertical: 14,
-    borderRadius: 4,
-    borderWidth: 1,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
     alignItems: 'center',
   },
-  ctaDisabledText: { fontSize: 13 },
-  error: { fontSize: 13, color: '#dc2626' },
-  cancelBtn: { paddingVertical: 12, alignItems: 'center' },
-  cancelText: { fontSize: 14 },
+  ctaDisabledText: {
+    fontSize: 11,
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
+  },
+  error: { fontSize: 13, lineHeight: 18, textAlign: 'center' },
+  cancelBtn: { paddingVertical: 8, alignItems: 'center' },
+  cancelText: {
+    fontSize: 11,
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
+  },
   emptyBlock: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 28,
-    gap: 12,
+    gap: 10,
   },
-  emptyHeading: { fontSize: 22 },
-  emptyBody: { fontSize: 14, textAlign: 'center' },
+  emptyEyebrow: {
+    fontSize: 10,
+    letterSpacing: 1.4,
+    textTransform: 'uppercase',
+    fontWeight: '700',
+  },
+  emptyHeading: {
+    fontSize: 24,
+    fontWeight: '800',
+    letterSpacing: -0.4,
+  },
+  emptyBody: { fontSize: 14, textAlign: 'center', lineHeight: 20 },
 });

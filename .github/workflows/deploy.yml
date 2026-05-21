@@ -1,0 +1,65 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Allow one concurrent deploy; don't cancel an in-flight one so a build
+# that started before this one finishes cleanly.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Build web bundle
+        env:
+          # Pages serves the site under /<repo>/, so Expo and our iframe
+          # leaflet paths both need to know the prefix.
+          EXPO_BASE_URL: /quad
+          EXPO_PUBLIC_BASE_URL: /quad
+          # Supabase keys: when set as repo secrets the deployed site
+          # talks to your real project. If unset we inject harmless
+          # placeholders that pass lib/supabase.ts's startup checks so
+          # the static export still completes. Without real keys, auth
+          # and posting fail at runtime — but the UI shell deploys.
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co' }}
+          EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.placeholderplaceholderplaceholderplaceholder.placeholderxx' }}
+        run: npx expo export --platform web --output-dir dist
+
+      # GitHub Pages otherwise tries to run Jekyll over the output, which
+      # strips files starting with `_` (and there are several from Expo).
+      - name: Disable Jekyll
+        run: touch dist/.nojekyll
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

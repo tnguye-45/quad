@@ -86,13 +86,18 @@ function hangoutToPin(h: Hangout): Pin {
   };
 }
 
+// When the site is served under a sub-path (e.g. /quad/ on GitHub Pages),
+// the iframe's absolute paths still resolve against the parent origin —
+// so /leaflet/leaflet.css would 404. Prefix with the build-time base URL.
+const BASE_URL = (process.env.EXPO_PUBLIC_BASE_URL ?? '').replace(/\/$/, '');
+
 function buildMapHtml(pins: Pin[]): string {
   return `<!DOCTYPE html>
 <html>
 <head>
 <meta name="viewport" content="initial-scale=1.0,width=device-width">
-<link rel="stylesheet" href="/leaflet/leaflet.css"/>
-<script src="/leaflet/leaflet.js"></script>
+<link rel="stylesheet" href="${BASE_URL}/leaflet/leaflet.css"/>
+<script src="${BASE_URL}/leaflet/leaflet.js"></script>
 <style>
   html,body,#map{height:100%;margin:0;padding:0;background:#fafafa;font-family:SFMono-Regular,Menlo,Monaco,Consolas,'Liberation Mono','Courier New',monospace}
   .pin-chip{

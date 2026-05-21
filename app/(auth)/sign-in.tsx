@@ -4,6 +4,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   TextInput,
   View,
@@ -12,7 +13,7 @@ import {
 import { NamePlaque } from '@/components/logo';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Colors, Fonts } from '@/constants/theme';
+import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useAuth } from '@/lib/auth-context';
 
@@ -32,7 +33,6 @@ export default function SignInScreen() {
     const { error } = await signIn(email, password);
     setBusy(false);
     if (error) setErr(error);
-    // On success, the auth gate in _layout.tsx redirects.
   }
 
   return (
@@ -40,79 +40,81 @@ export default function SignInScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       style={{ flex: 1 }}>
       <ThemedView style={[styles.screen, { backgroundColor: c.background }]}>
-        <View style={styles.heroBlock}>
-          <NamePlaque size="md" />
-          <ThemedText style={[styles.tagline, { color: c.textSecondary }]}>
-            Welcome back.
-          </ThemedText>
-        </View>
-
-        <View style={styles.form}>
-          <View style={styles.fieldGroup}>
-            <ThemedText style={[styles.fieldLabel, { color: c.textSecondary }]}>
-              School email
+        <ScrollView
+          contentContainerStyle={styles.scroll}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}>
+          <View style={styles.hero}>
+            <NamePlaque size="sm" />
+            <ThemedText style={[styles.eyebrow, { color: c.accent }]} type="mono">
+              welcome back
             </ThemedText>
-            <TextInput
-              value={email}
-              onChangeText={setEmail}
-              placeholder="you@nd.edu"
-              autoCapitalize="none"
-              autoComplete="email"
-              keyboardType="email-address"
-              placeholderTextColor={c.textSecondary}
-              style={[
-                styles.input,
-                { borderColor: c.border, color: c.text, backgroundColor: c.card },
-              ]}
-            />
-          </View>
-          <View style={styles.fieldGroup}>
-            <ThemedText style={[styles.fieldLabel, { color: c.textSecondary }]}>
-              Password
+            <ThemedText style={[styles.heading, { color: c.text }]}>
+              Sign in
             </ThemedText>
-            <TextInput
-              value={password}
-              onChangeText={setPassword}
-              secureTextEntry
-              autoComplete="current-password"
-              placeholderTextColor={c.textSecondary}
-              style={[
-                styles.input,
-                { borderColor: c.border, color: c.text, backgroundColor: c.card },
-              ]}
-            />
           </View>
 
-          <Link href="/(auth)/forgot-password" style={styles.forgotLink}>
-            <ThemedText style={[styles.forgotText, { color: c.textSecondary }]}>
-              Forgot password?
-            </ThemedText>
-          </Link>
+          <View style={styles.form}>
+            <FieldGroup label="School email" colors={c}>
+              <TextInput
+                value={email}
+                onChangeText={setEmail}
+                placeholder="you@nd.edu"
+                placeholderTextColor={c.textMuted}
+                autoCapitalize="none"
+                autoComplete="email"
+                keyboardType="email-address"
+                style={[styles.input, { color: c.text }]}
+              />
+              <View style={[styles.underline, { backgroundColor: c.border }]} />
+            </FieldGroup>
 
-          {err ? <ThemedText style={styles.error}>{err}</ThemedText> : null}
+            <FieldGroup label="Password" colors={c}>
+              <TextInput
+                value={password}
+                onChangeText={setPassword}
+                placeholder="••••••••"
+                placeholderTextColor={c.textMuted}
+                secureTextEntry
+                autoComplete="current-password"
+                style={[styles.input, { color: c.text }]}
+              />
+              <View style={[styles.underline, { backgroundColor: c.border }]} />
+            </FieldGroup>
 
-          <Pressable
-            disabled={!canSubmit}
-            onPress={handleSubmit}
-            style={({ pressed }) => [
-              styles.cta,
-              {
-                backgroundColor: c.tint,
-                opacity: !canSubmit ? 0.4 : pressed ? 0.85 : 1,
-              },
-            ]}>
-            <ThemedText style={[styles.ctaText, { color: c.background }]}>
-              {busy ? 'Signing in…' : 'Sign in'}
-            </ThemedText>
-          </Pressable>
-        </View>
+            <Link href="/(auth)/forgot-password" style={styles.forgotLink}>
+              <ThemedText style={[styles.forgotText, { color: c.textMuted }]} type="mono">
+                forgot password?
+              </ThemedText>
+            </Link>
+
+            {err ? (
+              <ThemedText style={[styles.error, { color: c.danger }]}>{err}</ThemedText>
+            ) : null}
+
+            <Pressable
+              disabled={!canSubmit}
+              onPress={handleSubmit}
+              style={({ pressed }) => [
+                styles.cta,
+                {
+                  backgroundColor: c.tint,
+                  opacity: !canSubmit ? 0.35 : pressed ? 0.85 : 1,
+                },
+              ]}>
+              <ThemedText style={[styles.ctaText, { color: c.background }]}>
+                {busy ? 'Signing in…' : 'Sign in'}
+              </ThemedText>
+            </Pressable>
+          </View>
+        </ScrollView>
 
         <View style={styles.footer}>
           <ThemedText style={[styles.footerText, { color: c.textSecondary }]}>
             New here?{' '}
           </ThemedText>
           <Link href="/(auth)/sign-up" replace>
-            <ThemedText type="defaultSemiBold" style={[styles.footerLink, { color: c.tint }]}>
+            <ThemedText style={[styles.footerLink, { color: c.text }]}>
               Create an account
             </ThemedText>
           </Link>
@@ -122,38 +124,81 @@ export default function SignInScreen() {
   );
 }
 
+function FieldGroup({
+  label,
+  children,
+  colors,
+}: {
+  label: string;
+  children: React.ReactNode;
+  colors: (typeof Colors)['light'];
+}) {
+  return (
+    <View style={styles.fieldGroup}>
+      <ThemedText style={[styles.fieldLabel, { color: colors.textMuted }]} type="mono">
+        {label.toLowerCase()}
+      </ThemedText>
+      {children}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
+  screen: { flex: 1 },
+  scroll: {
     paddingTop: 80,
-    paddingBottom: 40,
     paddingHorizontal: 28,
+    paddingBottom: 24,
     gap: 36,
   },
-  heroBlock: { gap: 12 },
-  tagline: { fontSize: 15, lineHeight: 22 },
-  form: { gap: 16 },
-  fieldGroup: { gap: 6 },
-  fieldLabel: { fontSize: 12, letterSpacing: 0.3, textTransform: 'uppercase' },
-  input: {
-    borderWidth: 1,
-    borderRadius: 4,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    fontSize: 14,
-    fontFamily: Fonts?.mono,
+  hero: { gap: 8, alignItems: 'flex-start' },
+  eyebrow: {
+    fontSize: 10,
+    letterSpacing: 1.4,
+    textTransform: 'uppercase',
+    fontWeight: '700',
+    marginTop: 12,
   },
-  forgotLink: { alignSelf: 'flex-end' },
-  forgotText: { fontSize: 13 },
-  error: { fontSize: 14, lineHeight: 20, color: '#dc2626' },
+  heading: {
+    fontSize: 30,
+    fontWeight: '800',
+    letterSpacing: -0.8,
+    lineHeight: 34,
+  },
+  form: { gap: 22 },
+  fieldGroup: { gap: 8 },
+  fieldLabel: {
+    fontSize: 10,
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
+    fontWeight: '600',
+  },
+  input: {
+    fontSize: 17,
+    paddingVertical: 8,
+    paddingHorizontal: 0,
+  },
+  underline: { height: 1 },
+  forgotLink: { alignSelf: 'flex-end', paddingVertical: 4 },
+  forgotText: {
+    fontSize: 10,
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+  },
+  error: { fontSize: 13, lineHeight: 18 },
   cta: {
     marginTop: 8,
     paddingVertical: 16,
-    borderRadius: 4,
+    borderRadius: 12,
     alignItems: 'center',
   },
-  ctaText: { fontSize: 16, fontWeight: '600' },
-  footer: { marginTop: 'auto', flexDirection: 'row', justifyContent: 'center' },
-  footerText: { fontSize: 14 },
-  footerLink: { fontSize: 14 },
+  ctaText: { fontSize: 15, fontWeight: '700', letterSpacing: 0.2 },
+  footer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    paddingVertical: 28,
+    paddingHorizontal: 28,
+  },
+  footerText: { fontSize: 13 },
+  footerLink: { fontSize: 13, fontWeight: '700' },
 });

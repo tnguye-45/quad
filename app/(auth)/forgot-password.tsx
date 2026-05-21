@@ -4,14 +4,16 @@ import {
   KeyboardAvoidingView,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   TextInput,
   View,
 } from 'react-native';
 
+import { NamePlaque } from '@/components/logo';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Colors, Fonts } from '@/constants/theme';
+import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useAuth } from '@/lib/auth-context';
 
@@ -40,104 +42,144 @@ export default function ForgotPasswordScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       style={{ flex: 1 }}>
       <ThemedView style={[styles.screen, { backgroundColor: c.background }]}>
-        <View style={styles.heroBlock}>
-          <ThemedText type="title" style={styles.heading}>
-            Reset your password
-          </ThemedText>
-          <ThemedText style={[styles.tagline, { color: c.textSecondary }]}>
-            We&apos;ll email you a link to set a new password.
-          </ThemedText>
-        </View>
-
-        {sent ? (
-          <View style={styles.sentBlock}>
-            <ThemedText style={[styles.sentText, { color: c.textSecondary }]}>
-              Check your inbox at <ThemedText type="defaultSemiBold">{email}</ThemedText> for the
-              reset link.
+        <ScrollView
+          contentContainerStyle={styles.scroll}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}>
+          <View style={styles.hero}>
+            <NamePlaque size="sm" />
+            <ThemedText style={[styles.eyebrow, { color: c.accent }]} type="mono">
+              reset
             </ThemedText>
-            <Pressable
-              onPress={() => router.replace('/(auth)/sign-in')}
-              style={({ pressed }) => [
-                styles.cta,
-                { backgroundColor: c.tint, opacity: pressed ? 0.85 : 1 },
-              ]}>
-              <ThemedText style={[styles.ctaText, { color: c.background }]}>
-                Back to sign in
-              </ThemedText>
-            </Pressable>
+            <ThemedText style={[styles.heading, { color: c.text }]}>
+              Reset your password
+            </ThemedText>
+            <ThemedText style={[styles.tagline, { color: c.textSecondary }]}>
+              We&apos;ll email you a link to set a new password.
+            </ThemedText>
           </View>
-        ) : (
-          <View style={styles.form}>
-            <View style={styles.fieldGroup}>
-              <ThemedText style={[styles.fieldLabel, { color: c.textSecondary }]}>
-                School email
+
+          {sent ? (
+            <View style={styles.sentBlock}>
+              <ThemedText style={[styles.sentText, { color: c.textSecondary }]}>
+                Check your inbox at{' '}
+                <ThemedText style={[styles.sentTextStrong, { color: c.text }]}>{email}</ThemedText>
+                {' '}for the reset link.
               </ThemedText>
-              <TextInput
-                value={email}
-                onChangeText={setEmail}
-                placeholder="you@nd.edu"
-                autoCapitalize="none"
-                autoComplete="email"
-                keyboardType="email-address"
-                placeholderTextColor={c.textSecondary}
-                style={[
-                  styles.input,
-                  { borderColor: c.border, color: c.text, backgroundColor: c.card },
-                ]}
-              />
+              <Pressable
+                onPress={() => router.replace('/(auth)/sign-in')}
+                style={({ pressed }) => [
+                  styles.cta,
+                  { backgroundColor: c.tint, opacity: pressed ? 0.85 : 1 },
+                ]}>
+                <ThemedText style={[styles.ctaText, { color: c.background }]}>
+                  Back to sign in
+                </ThemedText>
+              </Pressable>
             </View>
-            {err ? <ThemedText style={styles.error}>{err}</ThemedText> : null}
-            <Pressable
-              disabled={email.length < 4 || busy}
-              onPress={handleSubmit}
-              style={({ pressed }) => [
-                styles.cta,
-                {
-                  backgroundColor: c.tint,
-                  opacity: email.length < 4 || busy ? 0.4 : pressed ? 0.85 : 1,
-                },
-              ]}>
-              <ThemedText style={[styles.ctaText, { color: c.background }]}>
-                {busy ? 'Sending…' : 'Send reset link'}
-              </ThemedText>
-            </Pressable>
-          </View>
-        )}
+          ) : (
+            <View style={styles.form}>
+              <View style={styles.fieldGroup}>
+                <ThemedText style={[styles.fieldLabel, { color: c.textMuted }]} type="mono">
+                  school email
+                </ThemedText>
+                <TextInput
+                  value={email}
+                  onChangeText={setEmail}
+                  placeholder="you@nd.edu"
+                  placeholderTextColor={c.textMuted}
+                  autoCapitalize="none"
+                  autoComplete="email"
+                  keyboardType="email-address"
+                  style={[styles.input, { color: c.text }]}
+                />
+                <View style={[styles.underline, { backgroundColor: c.border }]} />
+              </View>
+              {err ? (
+                <ThemedText style={[styles.error, { color: c.danger }]}>{err}</ThemedText>
+              ) : null}
+              <Pressable
+                disabled={email.length < 4 || busy}
+                onPress={handleSubmit}
+                style={({ pressed }) => [
+                  styles.cta,
+                  {
+                    backgroundColor: c.tint,
+                    opacity: email.length < 4 || busy ? 0.35 : pressed ? 0.85 : 1,
+                  },
+                ]}>
+                <ThemedText style={[styles.ctaText, { color: c.background }]}>
+                  {busy ? 'Sending…' : 'Send reset link'}
+                </ThemedText>
+              </Pressable>
+              <Pressable
+                onPress={() => router.replace('/(auth)/sign-in')}
+                style={styles.cancelBtn}
+                hitSlop={8}>
+                <ThemedText style={[styles.cancelText, { color: c.textMuted }]} type="mono">
+                  cancel
+                </ThemedText>
+              </Pressable>
+            </View>
+          )}
+        </ScrollView>
       </ThemedView>
     </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
+  screen: { flex: 1 },
+  scroll: {
     paddingTop: 80,
-    paddingBottom: 40,
     paddingHorizontal: 28,
+    paddingBottom: 36,
     gap: 36,
   },
-  heroBlock: { gap: 10 },
-  heading: { fontSize: 26, lineHeight: 32 },
-  tagline: { fontSize: 15, lineHeight: 22 },
-  form: { gap: 16 },
+  hero: { gap: 8, alignItems: 'flex-start' },
+  eyebrow: {
+    fontSize: 10,
+    letterSpacing: 1.4,
+    textTransform: 'uppercase',
+    fontWeight: '700',
+    marginTop: 12,
+  },
+  heading: {
+    fontSize: 28,
+    fontWeight: '800',
+    letterSpacing: -0.6,
+    lineHeight: 32,
+  },
+  tagline: { fontSize: 14, lineHeight: 20, marginTop: 2 },
+  form: { gap: 22 },
   sentBlock: { gap: 20 },
   sentText: { fontSize: 15, lineHeight: 22 },
-  fieldGroup: { gap: 6 },
-  fieldLabel: { fontSize: 12, letterSpacing: 0.3, textTransform: 'uppercase' },
-  input: {
-    borderWidth: 1,
-    borderRadius: 4,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    fontSize: 14,
-    fontFamily: Fonts?.mono,
+  sentTextStrong: { fontSize: 15, lineHeight: 22, fontWeight: '700' },
+  fieldGroup: { gap: 8 },
+  fieldLabel: {
+    fontSize: 10,
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
+    fontWeight: '600',
   },
-  error: { fontSize: 14, lineHeight: 20, color: '#dc2626' },
+  input: {
+    fontSize: 17,
+    paddingVertical: 8,
+    paddingHorizontal: 0,
+  },
+  underline: { height: 1 },
+  error: { fontSize: 13, lineHeight: 18 },
   cta: {
     marginTop: 8,
     paddingVertical: 16,
-    borderRadius: 4,
+    borderRadius: 12,
     alignItems: 'center',
   },
-  ctaText: { fontSize: 16, fontWeight: '600' },
+  ctaText: { fontSize: 15, fontWeight: '700', letterSpacing: 0.2 },
+  cancelBtn: { paddingVertical: 8, alignItems: 'center' },
+  cancelText: {
+    fontSize: 10,
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
+  },
 });

@@ -12,7 +12,7 @@ import {
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Colors, Fonts } from '@/constants/theme';
+import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useAuth } from '@/lib/auth-context';
 import {
@@ -29,7 +29,6 @@ export default function PostVoiceScreen() {
   const { profile, session } = useAuth();
   const [body, setBody] = useState('');
   const [topic, setTopic] = useState<VoiceTopic | null>(null);
-  // Voices default to anonymous — that's the whole point of the tab.
   const [anonymous, setAnonymous] = useState(true);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -75,102 +74,116 @@ export default function PostVoiceScreen() {
           contentContainerStyle={styles.scroll}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}>
-          <View style={styles.heroBlock}>
-            <ThemedText type="title" style={styles.heading}>
+          <View style={styles.hero}>
+            <ThemedText style={[styles.eyebrow, { color: c.accent }]} type="mono">
+              voices · anonymous by default
+            </ThemedText>
+            <ThemedText style={[styles.heading, { color: c.text }]}>
               Speak your mind
             </ThemedText>
             <ThemedText style={[styles.tagline, { color: c.textSecondary }]}>
-              Anonymous by default. Other students can upvote or push back.
+              Other students can upvote or push back. Be sharp, not cruel.
             </ThemedText>
           </View>
 
-          <View style={styles.form}>
-            <View style={styles.fieldGroup}>
-              <ThemedText style={[styles.fieldLabel, { color: c.textSecondary }]}>
-                Topic *
-              </ThemedText>
-              <View style={styles.chipRow}>
-                {VOICE_TOPICS.map((t) => {
-                  const active = topic === t;
-                  return (
-                    <Pressable
-                      key={t}
-                      onPress={() => setTopic(t)}
+          <View style={styles.fieldGroup}>
+            <ThemedText style={[styles.label, { color: c.textMuted }]} type="mono">
+              topic
+            </ThemedText>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.storyRow}>
+              {VOICE_TOPICS.map((t) => {
+                const active = topic === t;
+                return (
+                  <Pressable
+                    key={t}
+                    onPress={() => setTopic(t)}
+                    hitSlop={4}
+                    style={styles.story}>
+                    <View
                       style={[
-                        styles.chip,
+                        styles.storyBubble,
                         {
-                          backgroundColor: active ? c.tint : c.card,
-                          borderColor: active ? c.tint : c.border,
+                          borderColor: active ? c.accent : c.border,
+                          backgroundColor: active ? c.surface : c.background,
+                          borderWidth: active ? 2.5 : 1.5,
                         },
                       ]}>
-                      <ThemedText style={styles.chipEmoji}>{VOICE_TOPIC_EMOJI[t]}</ThemedText>
-                      <ThemedText
-                        style={[
-                          styles.chipText,
-                          { color: active ? c.background : c.text },
-                        ]}>
-                        {t}
+                      <ThemedText style={styles.storyEmoji}>
+                        {VOICE_TOPIC_EMOJI[t]}
                       </ThemedText>
-                    </Pressable>
-                  );
-                })}
-              </View>
-            </View>
+                    </View>
+                    <ThemedText
+                      style={[
+                        styles.storyLabel,
+                        { color: active ? c.text : c.textSecondary },
+                        active && styles.storyLabelActive,
+                      ]}
+                      type="mono">
+                      {t.toLowerCase()}
+                    </ThemedText>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          </View>
 
-            <View style={styles.fieldGroup}>
-              <ThemedText style={[styles.fieldLabel, { color: c.textSecondary }]}>
-                What&apos;s on your mind? *
+          <View style={styles.fieldGroup}>
+            <View style={styles.labelRow}>
+              <ThemedText style={[styles.label, { color: c.textMuted }]} type="mono">
+                what&apos;s on your mind
               </ThemedText>
-              <TextInput
-                value={body}
-                onChangeText={setBody}
-                placeholder="Say it. No filters."
-                placeholderTextColor={c.textSecondary}
-                multiline
-                numberOfLines={5}
-                maxLength={400}
-                style={[
-                  styles.input,
-                  styles.bodyInput,
-                  { borderColor: c.border, color: c.text, backgroundColor: c.card },
-                ]}
-              />
-              <ThemedText style={[styles.charCount, { color: c.textSecondary }]}>
+              <ThemedText style={[styles.charCount, { color: c.textMuted }]} type="mono">
                 {body.length}/400
               </ThemedText>
             </View>
-
-            <PostAsToggle
-              anonymous={anonymous}
-              onChange={setAnonymous}
-              displayName={profile?.display_name ?? null}
-              initials={profile?.initials ?? null}
-              colors={c}
+            <TextInput
+              value={body}
+              onChangeText={setBody}
+              placeholder="Say it. No filters."
+              placeholderTextColor={c.textMuted}
+              multiline
+              numberOfLines={6}
+              maxLength={400}
+              style={[styles.bodyInput, { color: c.text }]}
             />
-
-            {err ? <ThemedText style={styles.error}>{err}</ThemedText> : null}
-
-            <Pressable
-              disabled={!canSubmit}
-              onPress={handleSubmit}
-              style={({ pressed }) => [
-                styles.cta,
-                {
-                  backgroundColor: c.tint,
-                  opacity: !canSubmit ? 0.4 : pressed ? 0.85 : 1,
-                },
-              ]}>
-              <ThemedText style={[styles.ctaText, { color: c.background }]}>
-                {busy ? 'Posting…' : 'Post'}
-              </ThemedText>
-            </Pressable>
-
-            <Pressable onPress={() => router.back()} style={styles.cancelBtn}>
-              <ThemedText style={[styles.cancelText, { color: c.textSecondary }]}>
-                Cancel
-              </ThemedText>
-            </Pressable>
+            <View style={[styles.underline, { backgroundColor: c.border }]} />
           </View>
+
+          <PostAsToggle
+            anonymous={anonymous}
+            onChange={setAnonymous}
+            displayName={profile?.display_name ?? null}
+            initials={profile?.initials ?? null}
+            colors={c}
+          />
+
+          {err ? (
+            <ThemedText style={[styles.error, { color: c.danger }]}>{err}</ThemedText>
+          ) : null}
+
+          <Pressable
+            disabled={!canSubmit}
+            onPress={handleSubmit}
+            style={({ pressed }) => [
+              styles.cta,
+              {
+                backgroundColor: c.tint,
+                opacity: !canSubmit ? 0.35 : pressed ? 0.85 : 1,
+              },
+            ]}>
+            <ThemedText style={[styles.ctaText, { color: c.background }]}>
+              {busy ? 'Posting…' : 'Post'}
+            </ThemedText>
+          </Pressable>
+
+          <Pressable onPress={() => router.back()} style={styles.cancelBtn} hitSlop={8}>
+            <ThemedText style={[styles.cancelText, { color: c.textMuted }]} type="mono">
+              cancel
+            </ThemedText>
+          </Pressable>
         </ScrollView>
       </ThemedView>
     </KeyboardAvoidingView>
@@ -180,54 +193,90 @@ export default function PostVoiceScreen() {
 const styles = StyleSheet.create({
   screen: { flex: 1 },
   scroll: {
-    paddingTop: 24,
-    paddingBottom: 40,
+    paddingTop: 16,
+    paddingBottom: 56,
     paddingHorizontal: 24,
     gap: 24,
   },
-  heroBlock: { gap: 8 },
-  heading: { fontSize: 24, lineHeight: 30 },
-  tagline: { fontSize: 14, lineHeight: 20 },
-  form: { gap: 18 },
-  fieldGroup: { gap: 6 },
-  fieldLabel: { fontSize: 12, letterSpacing: 0.3, textTransform: 'uppercase' },
-  input: {
-    borderWidth: 1,
-    borderRadius: 4,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    fontSize: 14,
-    fontFamily: Fonts?.mono,
+  hero: { gap: 6 },
+  eyebrow: {
+    fontSize: 10,
+    letterSpacing: 1.4,
+    textTransform: 'uppercase',
+    fontWeight: '700',
   },
-  bodyInput: {
-    minHeight: 120,
-    textAlignVertical: 'top',
-    paddingTop: 12,
+  heading: {
+    fontSize: 30,
+    fontWeight: '800',
+    letterSpacing: -0.8,
+    lineHeight: 34,
+  },
+  tagline: {
+    fontSize: 14,
+    lineHeight: 20,
+    marginTop: 4,
+  },
+  fieldGroup: { gap: 10 },
+  labelRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  label: {
+    fontSize: 10,
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
+    fontWeight: '600',
   },
   charCount: {
-    fontSize: 11,
-    alignSelf: 'flex-end',
+    fontSize: 10,
+    letterSpacing: 0.6,
   },
-  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4 },
-  chip: {
-    flexDirection: 'row',
+  storyRow: {
+    paddingTop: 4,
+    paddingBottom: 4,
+    gap: 14,
+  },
+  story: {
     alignItems: 'center',
     gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 4,
-    borderWidth: 1,
+    width: 64,
   },
-  chipEmoji: { fontSize: 13 },
-  chipText: { fontSize: 13, fontWeight: '500' },
-  error: { fontSize: 14, lineHeight: 20, color: '#dc2626' },
+  storyBubble: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  storyEmoji: { fontSize: 22 },
+  storyLabel: {
+    fontSize: 10,
+    letterSpacing: 0.3,
+    textTransform: 'lowercase',
+  },
+  storyLabelActive: { fontWeight: '700' },
+  bodyInput: {
+    fontSize: 17,
+    lineHeight: 24,
+    minHeight: 140,
+    paddingTop: 4,
+    paddingHorizontal: 0,
+    textAlignVertical: 'top',
+  },
+  underline: { height: 1 },
+  error: { fontSize: 13, lineHeight: 18 },
   cta: {
     marginTop: 8,
     paddingVertical: 16,
-    borderRadius: 4,
+    borderRadius: 12,
     alignItems: 'center',
   },
-  ctaText: { fontSize: 16, fontWeight: '600' },
-  cancelBtn: { paddingVertical: 12, alignItems: 'center' },
-  cancelText: { fontSize: 14 },
+  ctaText: { fontSize: 15, fontWeight: '700', letterSpacing: 0.2 },
+  cancelBtn: { paddingVertical: 8, alignItems: 'center' },
+  cancelText: {
+    fontSize: 11,
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
+  },
 });

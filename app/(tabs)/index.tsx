@@ -29,8 +29,8 @@ export default function GigsScreen() {
       <View style={styles.header}>
         <View style={styles.brandBlock}>
           <NamePlaque size="md" />
-          <ThemedText style={[styles.subtle, { color: c.textSecondary }]}>
-            University of Notre Dame · {gigs.length} open {gigs.length === 1 ? 'gig' : 'gigs'}
+          <ThemedText style={[styles.eyebrow, { color: c.textSecondary }]}>
+            Notre Dame · {gigs.length} open
           </ThemedText>
         </View>
         <Pressable
@@ -39,12 +39,13 @@ export default function GigsScreen() {
           style={({ pressed }) => [
             styles.avatar,
             {
-              backgroundColor: c.subtle,
               borderColor: c.border,
-              opacity: pressed ? 0.7 : 1,
+              opacity: pressed ? 0.5 : 1,
             },
           ]}>
-          <ThemedText style={styles.avatarText}>{profile?.initials || '?'}</ThemedText>
+          <ThemedText style={[styles.avatarText, { color: c.text }]}>
+            {profile?.initials || '?'}
+          </ThemedText>
         </Pressable>
       </View>
 
@@ -58,52 +59,40 @@ export default function GigsScreen() {
           {CATEGORIES.map((cat) => {
             const active = cat === selected;
             return (
-              <Pressable
-                key={cat}
-                onPress={() => setSelected(cat)}
-                style={[
-                  styles.filterPill,
-                  {
-                    backgroundColor: active ? c.tint : c.subtle,
-                    borderColor: active ? c.tint : c.border,
-                  },
-                ]}>
+              <Pressable key={cat} onPress={() => setSelected(cat)} hitSlop={6} style={styles.filterChip}>
                 <ThemedText
                   style={[
-                    styles.filterPillText,
-                    { color: active ? c.background : c.textSecondary },
+                    styles.filterText,
+                    { color: active ? c.text : c.textSecondary },
+                    active && styles.filterTextActive,
                   ]}>
-                  {cat}
+                  {cat.toLowerCase()}
                 </ThemedText>
               </Pressable>
             );
           })}
         </ScrollView>
 
-        <View style={styles.list}>
+        <View style={[styles.list, { borderTopColor: c.border }]}>
           {showLoading ? (
             <ThemedText
-              style={[styles.subtle, { textAlign: 'center', marginTop: 40, color: c.textSecondary }]}>
-              Loading gigs…
+              style={[styles.empty, { color: c.textSecondary }]}>
+              Loading…
+            </ThemedText>
+          ) : visible.length === 0 ? (
+            <ThemedText style={[styles.empty, { color: c.textSecondary }]}>
+              {gigs.length === 0
+                ? 'No gigs posted yet — be the first.'
+                : 'No gigs in this category yet.'}
             </ThemedText>
           ) : (
-            <>
-              {visible.map((gig) => (
-                <GigCard key={gig.id} gig={gig} c={c} />
-              ))}
-              {visible.length === 0 && (
-                <ThemedText
-                  style={[styles.subtle, { textAlign: 'center', marginTop: 40, color: c.textSecondary }]}>
-                  {gigs.length === 0
-                    ? 'No gigs posted yet — be the first.'
-                    : 'No gigs in this category yet.'}
-                </ThemedText>
-              )}
-            </>
+            visible.map((gig, i) => (
+              <GigRow key={gig.id} gig={gig} c={c} isFirst={i === 0} />
+            ))
           )}
         </View>
 
-        <View style={{ height: 96 }} />
+        <View style={{ height: 120 }} />
       </ScrollView>
 
       <Pressable
@@ -112,59 +101,50 @@ export default function GigsScreen() {
           { backgroundColor: c.tint, opacity: pressed ? 0.85 : 1 },
         ]}
         onPress={() => router.push('/post-gig')}>
-        <IconSymbol name="plus" size={18} color={c.background} />
-        <ThemedText style={[styles.fabText, { color: c.background }]}>Post a gig</ThemedText>
+        <IconSymbol name="plus" size={16} color={c.background} />
+        <ThemedText style={[styles.fabText, { color: c.background }]}>Post</ThemedText>
       </Pressable>
     </ThemedView>
   );
 }
 
-function GigCard({ gig, c }: { gig: Gig; c: (typeof Colors)['light'] }) {
+function GigRow({ gig, c, isFirst }: { gig: Gig; c: (typeof Colors)['light']; isFirst: boolean }) {
   return (
     <Pressable
       style={({ pressed }) => [
-        styles.card,
+        styles.row,
         {
-          backgroundColor: c.card,
-          borderColor: c.border,
-          opacity: pressed ? 0.7 : 1,
+          borderTopColor: c.border,
+          borderTopWidth: isFirst ? 0 : StyleSheet.hairlineWidth,
+          opacity: pressed ? 0.5 : 1,
         },
       ]}
       onPress={() => router.push({ pathname: '/gig/[id]', params: { id: gig.id } })}>
-      <View style={styles.cardTop}>
-        <View style={[styles.catTag, { backgroundColor: c.subtle }]}>
-          <ThemedText style={[styles.catTagText, { color: c.textSecondary }]}>
-            {gig.category}
-          </ThemedText>
-        </View>
-        <ThemedText type="defaultSemiBold" style={[styles.payout, { color: c.text }]}>
+      <View style={styles.rowTop}>
+        <ThemedText style={[styles.rowCategory, { color: c.textSecondary }]}>
+          {gig.category.toLowerCase()}
+        </ThemedText>
+        <ThemedText style={[styles.rowPayout, { color: c.text }]}>
           {gig.payout}
         </ThemedText>
       </View>
 
-      <ThemedText type="defaultSemiBold" style={styles.cardTitle}>
+      <ThemedText style={[styles.rowTitle, { color: c.text }]}>
         {gig.title}
       </ThemedText>
 
-      <View style={styles.cardMeta}>
-        <IconSymbol name="mappin.and.ellipse" size={13} color={c.textSecondary} />
-        <ThemedText style={[styles.metaText, { color: c.textSecondary }]}>{gig.where}</ThemedText>
-      </View>
-
-      <View style={[styles.divider, { backgroundColor: c.border }]} />
-
-      <View style={styles.cardFooter}>
-        <View style={styles.posterRow}>
-          <View style={[styles.posterAvatar, { backgroundColor: c.subtle }]}>
-            <ThemedText style={styles.posterAvatarText}>
-              {gig.anonymous || !gig.posterInitials ? '??' : gig.posterInitials}
-            </ThemedText>
-          </View>
-          <ThemedText style={[styles.metaText, { color: c.text }]}>
-            {gig.anonymous || !gig.posterName ? 'Anonymous' : gig.posterName}
-          </ThemedText>
-        </View>
-        <ThemedText style={[styles.metaText, { color: c.textSecondary }]}>{gig.postedAgo}</ThemedText>
+      <View style={styles.rowMeta}>
+        <ThemedText style={[styles.rowMetaText, { color: c.textSecondary }]}>
+          {gig.where}
+        </ThemedText>
+        <ThemedText style={[styles.rowDot, { color: c.textSecondary }]}>·</ThemedText>
+        <ThemedText style={[styles.rowMetaText, { color: c.textSecondary }]}>
+          {gig.anonymous || !gig.posterName ? 'anonymous' : gig.posterName}
+        </ThemedText>
+        <ThemedText style={[styles.rowDot, { color: c.textSecondary }]}>·</ThemedText>
+        <ThemedText style={[styles.rowMetaText, { color: c.textSecondary }]}>
+          {gig.postedAgo}
+        </ThemedText>
       </View>
     </Pressable>
   );
@@ -178,22 +158,22 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     paddingHorizontal: 20,
-    paddingBottom: 20,
+    paddingBottom: 24,
   },
   brandBlock: {
-    gap: 6,
+    gap: 8,
   },
-  subtle: {
-    fontSize: 13,
-    marginTop: 4,
+  eyebrow: {
+    fontSize: 12,
+    letterSpacing: 0.2,
   },
   avatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    borderWidth: 1,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: StyleSheet.hairlineWidth,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -206,103 +186,79 @@ const styles = StyleSheet.create({
   },
   filterRow: {
     paddingHorizontal: 20,
-    gap: 8,
-    paddingBottom: 16,
+    gap: 18,
+    paddingBottom: 8,
+    paddingTop: 4,
   },
-  filterPill: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 4,
-    borderWidth: 1,
+  filterChip: {
+    paddingVertical: 6,
   },
-  filterPillText: {
+  filterText: {
     fontSize: 13,
-    fontWeight: '500',
+    letterSpacing: 0.1,
+  },
+  filterTextActive: {
+    fontWeight: '600',
   },
   list: {
     paddingHorizontal: 20,
-    gap: 10,
+    marginTop: 12,
   },
-  card: {
-    borderRadius: 4,
-    borderWidth: 1,
-    padding: 16,
-    gap: 10,
-  },
-  cardTop: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  catTag: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 2,
-  },
-  catTagText: {
-    fontSize: 11,
-    fontWeight: '600',
-    letterSpacing: 0.3,
-    textTransform: 'uppercase',
-  },
-  payout: {
-    fontSize: 18,
-  },
-  cardTitle: {
-    fontSize: 15,
-    lineHeight: 21,
-  },
-  cardMeta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-  },
-  metaText: {
-    fontSize: 13,
-  },
-  divider: {
-    height: 1,
-    marginTop: 4,
-  },
-  cardFooter: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  posterRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  row: {
+    paddingVertical: 18,
     gap: 8,
   },
-  posterAvatar: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
+  rowTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'baseline',
   },
-  posterAvatarText: {
-    fontSize: 10,
-    fontWeight: '600',
+  rowCategory: {
+    fontSize: 11,
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
+  },
+  rowPayout: {
+    fontSize: 20,
+    fontWeight: '700',
+    letterSpacing: -0.3,
+  },
+  rowTitle: {
+    fontSize: 16,
+    lineHeight: 22,
+    fontWeight: '500',
+  },
+  rowMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flexWrap: 'wrap',
+  },
+  rowMetaText: {
+    fontSize: 12,
+  },
+  rowDot: {
+    fontSize: 12,
+  },
+  empty: {
+    fontSize: 13,
+    textAlign: 'center',
+    paddingVertical: 60,
   },
   fab: {
     position: 'absolute',
-    bottom: 24,
+    bottom: 28,
     alignSelf: 'center',
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 18,
-    paddingVertical: 13,
+    gap: 6,
+    paddingHorizontal: 22,
+    paddingVertical: 12,
     borderRadius: 999,
-    shadowColor: '#000',
-    shadowOpacity: 0.12,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 4,
   },
   fabText: {
     fontWeight: '600',
     fontSize: 14,
+    letterSpacing: 0.1,
   },
 });

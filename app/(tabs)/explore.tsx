@@ -18,33 +18,36 @@ export default function HangoutsScreen() {
   return (
     <ThemedView style={[styles.screen, { backgroundColor: c.background }]}>
       <View style={styles.header}>
-        <View style={styles.brandRow}>
-          <NamePlaque size="sm" />
-          <View style={[styles.divider, { backgroundColor: c.border }]} />
-          <ThemedText type="defaultSemiBold" style={[styles.section, { color: c.textSecondary }]}>
-            Hangouts
-          </ThemedText>
-        </View>
-        <ThemedText style={[styles.subtle, { color: c.textSecondary }]}>
+        <NamePlaque size="sm" />
+        <ThemedText style={[styles.title, { color: c.text }]}>Hangouts</ThemedText>
+        <ThemedText style={[styles.eyebrow, { color: c.textSecondary }]}>
           Find people doing things you&apos;d want to do
         </ThemedText>
       </View>
 
-      <ScrollView contentContainerStyle={styles.list} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={[styles.list, { borderTopColor: c.border }]}
+        showsVerticalScrollIndicator={false}>
         {showLoading ? (
-          <ThemedText style={[styles.subtle, { textAlign: 'center', marginTop: 40 }]}>
-            Loading hangouts…
+          <ThemedText style={[styles.empty, { color: c.textSecondary }]}>
+            Loading…
           </ThemedText>
         ) : hangouts.length === 0 ? (
-          <ThemedText style={[styles.subtle, { textAlign: 'center', marginTop: 40 }]}>
+          <ThemedText style={[styles.empty, { color: c.textSecondary }]}>
             No hangouts yet — start one.
           </ThemedText>
         ) : (
-          hangouts.map((h) => (
-            <HangoutCard key={h.id} hangout={h} c={c} onJoin={() => rsvpHangout(h.id)} />
+          hangouts.map((h, i) => (
+            <HangoutRow
+              key={h.id}
+              hangout={h}
+              c={c}
+              onJoin={() => rsvpHangout(h.id)}
+              isFirst={i === 0}
+            />
           ))
         )}
-        <View style={{ height: 96 }} />
+        <View style={{ height: 120 }} />
       </ScrollView>
 
       <Pressable
@@ -53,69 +56,77 @@ export default function HangoutsScreen() {
           { backgroundColor: c.tint, opacity: pressed ? 0.85 : 1 },
         ]}
         onPress={() => router.push('/start-hangout')}>
-        <IconSymbol name="plus" size={18} color={c.background} />
+        <IconSymbol name="plus" size={16} color={c.background} />
         <ThemedText style={[styles.fabText, { color: c.background }]}>Start a hangout</ThemedText>
       </Pressable>
     </ThemedView>
   );
 }
 
-function HangoutCard({
+function HangoutRow({
   hangout,
   c,
   onJoin,
+  isFirst,
 }: {
   hangout: Hangout;
   c: (typeof Colors)['light'];
   onJoin: () => void;
+  isFirst: boolean;
 }) {
   const hostLabel =
-    hangout.anonymous || !hangout.hostName ? 'Anonymous host' : `Hosted by ${hangout.hostName}`;
+    hangout.anonymous || !hangout.hostName ? 'anonymous host' : hangout.hostName;
   return (
     <View
       style={[
-        styles.card,
+        styles.row,
         {
-          backgroundColor: c.card,
-          borderColor: c.border,
+          borderTopColor: c.border,
+          borderTopWidth: isFirst ? 0 : StyleSheet.hairlineWidth,
         },
       ]}>
-      <View style={styles.cardTop}>
-        <View style={[styles.vibeTag, { backgroundColor: c.subtle }]}>
-          <ThemedText style={[styles.vibeTagText, { color: c.textSecondary }]}>
-            {hangout.vibe}
-          </ThemedText>
-        </View>
+      <View style={styles.rowTop}>
+        <ThemedText style={[styles.vibeText, { color: c.textSecondary }]}>
+          {hangout.vibe.toLowerCase()}
+        </ThemedText>
         <ThemedText style={[styles.goingText, { color: c.textSecondary }]}>
-          {hangout.going} {hangout.going === 1 ? 'person' : 'people'} going
+          {hangout.going} {hangout.going === 1 ? 'going' : 'going'}
         </ThemedText>
       </View>
 
-      <ThemedText type="defaultSemiBold" style={styles.cardTitle}>
+      <ThemedText style={[styles.rowTitle, { color: c.text }]}>
         {hangout.title}
       </ThemedText>
 
-      <View style={styles.metaRow}>
-        <IconSymbol name="clock.fill" size={13} color={c.textSecondary} />
-        <ThemedText style={[styles.metaText, { color: c.textSecondary }]}>{hangout.when}</ThemedText>
+      <View style={styles.rowMeta}>
+        <ThemedText style={[styles.rowMetaText, { color: c.textSecondary }]}>
+          {hangout.when}
+        </ThemedText>
+        <ThemedText style={[styles.rowDot, { color: c.textSecondary }]}>·</ThemedText>
+        <ThemedText style={[styles.rowMetaText, { color: c.textSecondary }]}>
+          {hangout.where}
+        </ThemedText>
       </View>
-      <View style={styles.metaRow}>
-        <IconSymbol name="mappin.and.ellipse" size={13} color={c.textSecondary} />
-        <ThemedText style={[styles.metaText, { color: c.textSecondary }]}>{hangout.where}</ThemedText>
-      </View>
-      <ThemedText style={[styles.hostText, { color: c.textSecondary }]}>{hostLabel}</ThemedText>
 
-      <Pressable
-        onPress={onJoin}
-        style={({ pressed }) => [
-          styles.joinBtn,
-          {
-            backgroundColor: pressed ? c.subtle : 'transparent',
-            borderColor: c.border,
-          },
-        ]}>
-        <ThemedText style={[styles.joinBtnText, { color: c.text }]}>I&apos;m in</ThemedText>
-      </Pressable>
+      <View style={styles.rowFoot}>
+        <ThemedText style={[styles.hostText, { color: c.textSecondary }]}>
+          {hostLabel}
+        </ThemedText>
+        <Pressable
+          onPress={onJoin}
+          hitSlop={6}
+          style={({ pressed }) => [
+            styles.joinBtn,
+            {
+              borderColor: c.text,
+              opacity: pressed ? 0.5 : 1,
+            },
+          ]}>
+          <ThemedText style={[styles.joinBtnText, { color: c.text }]}>
+            I&apos;m in
+          </ThemedText>
+        </Pressable>
+      </View>
     </View>
   );
 }
@@ -127,102 +138,98 @@ const styles = StyleSheet.create({
   },
   header: {
     paddingHorizontal: 20,
-    paddingBottom: 16,
+    paddingBottom: 24,
+    gap: 14,
   },
-  brandRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
+  title: {
+    fontSize: 28,
+    fontWeight: '700',
+    letterSpacing: -0.6,
+    lineHeight: 32,
   },
-  divider: {
-    width: 1,
-    height: 16,
-  },
-  section: {
-    fontSize: 14,
-    letterSpacing: 0.3,
-    textTransform: 'uppercase',
-  },
-  subtle: {
-    fontSize: 13,
-    marginTop: 6,
+  eyebrow: {
+    fontSize: 12,
+    letterSpacing: 0.2,
+    marginTop: -6,
   },
   list: {
     paddingHorizontal: 20,
-    paddingTop: 4,
-    gap: 10,
   },
-  card: {
-    borderRadius: 4,
-    borderWidth: 1,
-    padding: 16,
+  row: {
+    paddingVertical: 20,
     gap: 8,
   },
-  cardTop: {
+  rowTop: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
-  vibeTag: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 2,
-  },
-  vibeTagText: {
+  vibeText: {
     fontSize: 11,
     fontWeight: '600',
-    letterSpacing: 0.3,
+    letterSpacing: 0.6,
     textTransform: 'uppercase',
   },
   goingText: {
     fontSize: 12,
   },
-  cardTitle: {
-    fontSize: 15,
-    lineHeight: 21,
+  rowTitle: {
+    fontSize: 16,
+    lineHeight: 22,
+    fontWeight: '500',
   },
-  metaRow: {
+  rowMeta: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
+    flexWrap: 'wrap',
   },
-  metaText: {
-    fontSize: 13,
+  rowMetaText: {
+    fontSize: 12,
+  },
+  rowDot: {
+    fontSize: 12,
+  },
+  rowFoot: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingTop: 6,
   },
   hostText: {
     fontSize: 12,
     fontStyle: 'italic',
-    marginTop: 2,
   },
   joinBtn: {
-    marginTop: 6,
-    paddingVertical: 9,
-    borderRadius: 4,
-    borderWidth: 1,
-    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 999,
+    borderWidth: StyleSheet.hairlineWidth,
   },
   joinBtnText: {
     fontWeight: '600',
+    fontSize: 12,
+    letterSpacing: 0.2,
+  },
+  empty: {
     fontSize: 13,
+    textAlign: 'center',
+    paddingVertical: 60,
   },
   fab: {
     position: 'absolute',
-    bottom: 24,
+    bottom: 28,
     alignSelf: 'center',
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 18,
-    paddingVertical: 13,
+    gap: 6,
+    paddingHorizontal: 22,
+    paddingVertical: 12,
     borderRadius: 999,
-    shadowColor: '#000',
-    shadowOpacity: 0.12,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 4,
   },
   fabText: {
     fontWeight: '600',
     fontSize: 14,
+    letterSpacing: 0.1,
   },
 });

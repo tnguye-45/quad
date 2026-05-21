@@ -57,14 +57,9 @@ export default function MessagesScreen() {
   return (
     <ThemedView style={[styles.screen, { backgroundColor: c.background }]}>
       <View style={styles.header}>
-        <View style={styles.brandRow}>
-          <NamePlaque size="sm" />
-          <View style={[styles.divider, { backgroundColor: c.border }]} />
-          <ThemedText type="defaultSemiBold" style={[styles.section, { color: c.textSecondary }]}>
-            Messages
-          </ThemedText>
-        </View>
-        <ThemedText style={[styles.subtle, { color: c.textSecondary }]}>
+        <NamePlaque size="sm" />
+        <ThemedText style={[styles.title, { color: c.text }]}>Messages</ThemedText>
+        <ThemedText style={[styles.eyebrow, { color: c.textSecondary }]}>
           {unreadCount} unread · {items.length} total
         </ThemedText>
       </View>
@@ -75,13 +70,13 @@ export default function MessagesScreen() {
 
       {useReal && loading && items.length === 0 ? (
         <View style={styles.emptyBlock}>
-          <ThemedText style={[styles.subtle, { color: c.textSecondary }]}>
-            Loading conversations…
+          <ThemedText style={[styles.empty, { color: c.textSecondary }]}>
+            Loading…
           </ThemedText>
         </View>
       ) : useReal && items.length === 0 ? (
         <View style={styles.emptyBlock}>
-          <ThemedText type="defaultSemiBold" style={styles.emptyHeading}>
+          <ThemedText style={[styles.emptyHeading, { color: c.text }]}>
             No conversations yet
           </ThemedText>
           <ThemedText style={[styles.emptyBody, { color: c.textSecondary }]}>
@@ -89,8 +84,10 @@ export default function MessagesScreen() {
           </ThemedText>
         </View>
       ) : (
-        <ScrollView contentContainerStyle={styles.list} showsVerticalScrollIndicator={false}>
-          {items.map((co) => {
+        <ScrollView
+          contentContainerStyle={styles.list}
+          showsVerticalScrollIndicator={false}>
+          {items.map((co, i) => {
             const isReal = '__real' in co;
             const name = isReal ? co.partnerName : co.name;
             const initials = isReal ? co.partnerInitials : co.initials;
@@ -105,22 +102,29 @@ export default function MessagesScreen() {
                 style={({ pressed }) => [
                   styles.row,
                   {
-                    borderBottomColor: c.border,
-                    backgroundColor: pressed ? c.subtle : 'transparent',
+                    borderTopColor: c.border,
+                    borderTopWidth: i === 0 ? 0 : StyleSheet.hairlineWidth,
+                    opacity: pressed ? 0.5 : 1,
                   },
                 ]}>
-                <View style={[styles.avatar, { backgroundColor: c.subtle, borderColor: c.border }]}>
-                  <ThemedText style={styles.avatarText}>{initials}</ThemedText>
+                <View style={[styles.avatar, { borderColor: c.border }]}>
+                  <ThemedText style={[styles.avatarText, { color: c.text }]}>
+                    {initials}
+                  </ThemedText>
                 </View>
 
                 <View style={styles.rowMain}>
                   <View style={styles.rowTop}>
-                    <ThemedText type="defaultSemiBold" style={styles.name}>
+                    <ThemedText style={[styles.name, { color: c.text }]} numberOfLines={1}>
                       {name}
                     </ThemedText>
-                    <ThemedText style={[styles.time, { color: c.textSecondary }]}>{time}</ThemedText>
+                    <ThemedText style={[styles.time, { color: c.textSecondary }]}>
+                      {time}
+                    </ThemedText>
                   </View>
-                  <ThemedText style={[styles.context, { color: c.textSecondary }]}>
+                  <ThemedText
+                    style={[styles.context, { color: c.textSecondary }]}
+                    numberOfLines={1}>
                     {context}
                   </ThemedText>
                   <View style={styles.rowBottom}>
@@ -153,85 +157,81 @@ const styles = StyleSheet.create({
   },
   header: {
     paddingHorizontal: 20,
-    paddingBottom: 16,
+    paddingBottom: 20,
+    gap: 14,
   },
-  brandRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
+  title: {
+    fontSize: 28,
+    fontWeight: '700',
+    letterSpacing: -0.6,
+    lineHeight: 32,
   },
-  divider: {
-    width: 1,
-    height: 16,
-  },
-  section: {
-    fontSize: 14,
-    letterSpacing: 0.3,
-    textTransform: 'uppercase',
-  },
-  subtle: {
-    fontSize: 13,
-    marginTop: 6,
+  eyebrow: {
+    fontSize: 12,
+    letterSpacing: 0.2,
+    marginTop: -6,
   },
   list: {
-    paddingTop: 4,
+    paddingHorizontal: 20,
   },
   row: {
     flexDirection: 'row',
-    paddingHorizontal: 20,
-    paddingVertical: 14,
+    paddingVertical: 16,
     gap: 14,
-    borderBottomWidth: StyleSheet.hairlineWidth,
     alignItems: 'flex-start',
   },
   avatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    borderWidth: 1,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    borderWidth: StyleSheet.hairlineWidth,
     alignItems: 'center',
     justifyContent: 'center',
   },
   avatarText: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '600',
   },
   rowMain: {
     flex: 1,
-    gap: 2,
+    gap: 3,
   },
   rowTop: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    gap: 8,
   },
   name: {
     fontSize: 15,
+    fontWeight: '600',
+    flex: 1,
   },
   time: {
     fontSize: 12,
   },
   context: {
     fontSize: 12,
-    marginBottom: 2,
   },
   rowBottom: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 10,
+    marginTop: 2,
   },
   preview: {
-    fontSize: 14,
+    fontSize: 13,
     flex: 1,
+    lineHeight: 18,
   },
   previewUnread: {
     fontWeight: '600',
   },
   unreadDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
   },
   emptyBlock: {
     flex: 1,
@@ -240,8 +240,13 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 8,
   },
+  empty: {
+    fontSize: 13,
+    textAlign: 'center',
+  },
   emptyHeading: {
     fontSize: 18,
+    fontWeight: '600',
   },
   emptyBody: {
     fontSize: 14,

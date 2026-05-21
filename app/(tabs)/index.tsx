@@ -2,23 +2,31 @@ import { router } from 'expo-router';
 import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
-import { CampusMap } from '@/components/campus-map';
-import { NamePlaque } from '@/components/logo';
+import { ScreenHeader } from '@/components/screen-header';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import { useAuth } from '@/lib/auth-context';
-import { GIG_CATEGORIES, usePosts, type Gig } from '@/lib/posts-store';
+import { GIG_CATEGORIES, usePosts, type Gig, type GigCategory } from '@/lib/posts-store';
 
-const CATEGORIES = ['All', ...GIG_CATEGORIES] as const;
+type CatKey = 'All' | GigCategory;
+const CATEGORIES: CatKey[] = ['All', ...GIG_CATEGORIES];
+
+const CATEGORY_EMOJI: Record<CatKey, string> = {
+  All: '✨',
+  Tutoring: '📚',
+  Moving: '📦',
+  Rideshare: '🚗',
+  Pets: '🐾',
+  Creative: '🎨',
+  Errands: '🛒',
+};
 
 export default function GigsScreen() {
-  const [selected, setSelected] = useState<(typeof CATEGORIES)[number]>('All');
+  const [selected, setSelected] = useState<CatKey>('All');
   const scheme = useColorScheme() ?? 'light';
   const c = Colors[scheme];
-  const { profile } = useAuth();
   const { gigs, loading, hydrated } = usePosts();
 
   const visible = selected === 'All' ? gigs : gigs.filter((g) => g.category === selected);
@@ -26,46 +34,56 @@ export default function GigsScreen() {
 
   return (
     <ThemedView style={[styles.screen, { backgroundColor: c.background }]}>
-      <View style={styles.header}>
-        <View style={styles.brandBlock}>
-          <NamePlaque size="md" />
-          <ThemedText style={[styles.eyebrow, { color: c.textSecondary }]}>
-            Notre Dame · {gigs.length} open
-          </ThemedText>
-        </View>
-        <Pressable
-          onPress={() => router.push('/modal')}
-          accessibilityLabel="Open your profile"
-          style={({ pressed }) => [
-            styles.avatar,
-            {
-              borderColor: c.border,
-              opacity: pressed ? 0.5 : 1,
-            },
-          ]}>
-          <ThemedText style={[styles.avatarText, { color: c.text }]}>
-            {profile?.initials || '?'}
-          </ThemedText>
-        </Pressable>
-      </View>
+      <ScreenHeader
+        title="Gigs"
+        subtitle={`notre dame · ${gigs.length} open`}
+        rightActions={[
+          {
+            icon: 'map',
+            label: 'Open map',
+            onPress: () => router.push('/map' as never),
+          },
+          {
+            icon: 'magnifyingglass',
+            label: 'Search',
+            onPress: () => {},
+          },
+        ]}
+      />
 
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-        <CampusMap />
-
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.filterRow}>
+          contentContainerStyle={styles.storyRow}>
           {CATEGORIES.map((cat) => {
             const active = cat === selected;
             return (
-              <Pressable key={cat} onPress={() => setSelected(cat)} hitSlop={6} style={styles.filterChip}>
+              <Pressable
+                key={cat}
+                onPress={() => setSelected(cat)}
+                hitSlop={4}
+                style={styles.story}>
+                <View
+                  style={[
+                    styles.storyBubble,
+                    {
+                      borderColor: active ? c.accent : c.border,
+                      backgroundColor: active ? c.surface : c.background,
+                      borderWidth: active ? 2.5 : 1.5,
+                    },
+                  ]}>
+                  <ThemedText style={styles.storyEmoji}>
+                    {CATEGORY_EMOJI[cat]}
+                  </ThemedText>
+                </View>
                 <ThemedText
                   style={[
-                    styles.filterText,
+                    styles.storyLabel,
                     { color: active ? c.text : c.textSecondary },
-                    active && styles.filterTextActive,
-                  ]}>
+                    active && styles.storyLabelActive,
+                  ]}
+                  type="mono">
                   {cat.toLowerCase()}
                 </ThemedText>
               </Pressable>
@@ -73,10 +91,11 @@ export default function GigsScreen() {
           })}
         </ScrollView>
 
-        <View style={[styles.list, { borderTopColor: c.border }]}>
+        <View style={[styles.divider, { backgroundColor: c.border }]} />
+
+        <View style={styles.list}>
           {showLoading ? (
-            <ThemedText
-              style={[styles.empty, { color: c.textSecondary }]}>
+            <ThemedText style={[styles.empty, { color: c.textSecondary }]}>
               Loading…
             </ThemedText>
           ) : visible.length === 0 ? (
@@ -86,65 +105,57 @@ export default function GigsScreen() {
                 : 'No gigs in this category yet.'}
             </ThemedText>
           ) : (
-            visible.map((gig, i) => (
-              <GigRow key={gig.id} gig={gig} c={c} isFirst={i === 0} />
-            ))
+            visible.map((gig) => <GigRow key={gig.id} gig={gig} c={c} />)
           )}
         </View>
 
         <View style={{ height: 120 }} />
       </ScrollView>
-
-      <Pressable
-        style={({ pressed }) => [
-          styles.fab,
-          { backgroundColor: c.tint, opacity: pressed ? 0.85 : 1 },
-        ]}
-        onPress={() => router.push('/post-gig')}>
-        <IconSymbol name="plus" size={16} color={c.background} />
-        <ThemedText style={[styles.fabText, { color: c.background }]}>Post</ThemedText>
-      </Pressable>
     </ThemedView>
   );
 }
 
-function GigRow({ gig, c, isFirst }: { gig: Gig; c: (typeof Colors)['light']; isFirst: boolean }) {
+function GigRow({ gig, c }: { gig: Gig; c: (typeof Colors)['light'] }) {
+  const poster = gig.anonymous || !gig.posterName ? 'anonymous' : gig.posterName;
+  const initials = gig.anonymous || !gig.posterInitials ? '?' : gig.posterInitials;
+
   return (
     <Pressable
       style={({ pressed }) => [
         styles.row,
-        {
-          borderTopColor: c.border,
-          borderTopWidth: isFirst ? 0 : StyleSheet.hairlineWidth,
-          opacity: pressed ? 0.5 : 1,
-        },
+        { borderBottomColor: c.border, opacity: pressed ? 0.5 : 1 },
       ]}
       onPress={() => router.push({ pathname: '/gig/[id]', params: { id: gig.id } })}>
-      <View style={styles.rowTop}>
-        <ThemedText style={[styles.rowCategory, { color: c.textSecondary }]}>
-          {gig.category.toLowerCase()}
-        </ThemedText>
-        <ThemedText style={[styles.rowPayout, { color: c.text }]}>
-          {gig.payout}
-        </ThemedText>
+      <View style={[styles.rowAvatar, { borderColor: c.border, backgroundColor: c.subtle }]}>
+        <ThemedText style={[styles.rowAvatarText, { color: c.text }]}>{initials}</ThemedText>
       </View>
 
-      <ThemedText style={[styles.rowTitle, { color: c.text }]}>
-        {gig.title}
-      </ThemedText>
+      <View style={styles.rowMain}>
+        <View style={styles.rowTop}>
+          <ThemedText style={[styles.rowCategory, { color: c.textMuted }]} type="mono">
+            {gig.category.toLowerCase()} · {gig.postedAgo}
+          </ThemedText>
+        </View>
 
-      <View style={styles.rowMeta}>
-        <ThemedText style={[styles.rowMetaText, { color: c.textSecondary }]}>
-          {gig.where}
+        <ThemedText style={[styles.rowTitle, { color: c.text }]} numberOfLines={2}>
+          {gig.title}
         </ThemedText>
-        <ThemedText style={[styles.rowDot, { color: c.textSecondary }]}>·</ThemedText>
-        <ThemedText style={[styles.rowMetaText, { color: c.textSecondary }]}>
-          {gig.anonymous || !gig.posterName ? 'anonymous' : gig.posterName}
-        </ThemedText>
-        <ThemedText style={[styles.rowDot, { color: c.textSecondary }]}>·</ThemedText>
-        <ThemedText style={[styles.rowMetaText, { color: c.textSecondary }]}>
-          {gig.postedAgo}
-        </ThemedText>
+
+        <View style={styles.rowFoot}>
+          <View style={styles.rowFootLeft}>
+            <IconSymbol name="mappin" size={11} color={c.textMuted} />
+            <ThemedText style={[styles.rowFootText, { color: c.textMuted }]} type="mono">
+              {gig.where.toLowerCase()}
+            </ThemedText>
+            <ThemedText style={[styles.rowFootText, { color: c.textMuted }]} type="mono">
+              · {poster.toLowerCase()}
+            </ThemedText>
+          </View>
+        </View>
+      </View>
+
+      <View style={[styles.payoutTag, { borderColor: c.borderStrong }]}>
+        <ThemedText style={[styles.payoutText, { color: c.text }]}>{gig.payout}</ThemedText>
       </View>
     </Pressable>
   );
@@ -153,112 +164,119 @@ function GigRow({ gig, c, isFirst }: { gig: Gig; c: (typeof Colors)['light']; is
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    paddingTop: 60,
-  },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    paddingHorizontal: 20,
-    paddingBottom: 24,
-  },
-  brandBlock: {
-    gap: 8,
-  },
-  eyebrow: {
-    fontSize: 12,
-    letterSpacing: 0.2,
-  },
-  avatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    borderWidth: StyleSheet.hairlineWidth,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarText: {
-    fontSize: 12,
-    fontWeight: '600',
   },
   scroll: {
     paddingBottom: 20,
   },
-  filterRow: {
+  storyRow: {
     paddingHorizontal: 20,
-    gap: 18,
-    paddingBottom: 8,
     paddingTop: 4,
+    paddingBottom: 18,
+    gap: 16,
   },
-  filterChip: {
-    paddingVertical: 6,
+  story: {
+    alignItems: 'center',
+    gap: 6,
+    width: 64,
   },
-  filterText: {
-    fontSize: 13,
-    letterSpacing: 0.1,
+  storyBubble: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    borderWidth: 1.5,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  filterTextActive: {
-    fontWeight: '600',
+  storyEmoji: {
+    fontSize: 22,
+  },
+  storyLabel: {
+    fontSize: 10,
+    letterSpacing: 0.3,
+    textTransform: 'lowercase',
+  },
+  storyLabelActive: {
+    fontWeight: '700',
+  },
+  divider: {
+    height: StyleSheet.hairlineWidth,
+    marginHorizontal: 0,
   },
   list: {
-    paddingHorizontal: 20,
-    marginTop: 12,
+    paddingHorizontal: 0,
   },
   row: {
-    paddingVertical: 18,
-    gap: 8,
+    flexDirection: 'row',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    gap: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    alignItems: 'flex-start',
+  },
+  rowAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  rowAvatarText: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  rowMain: {
+    flex: 1,
+    gap: 4,
+    paddingTop: 2,
   },
   rowTop: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'baseline',
+    alignItems: 'center',
   },
   rowCategory: {
-    fontSize: 11,
+    fontSize: 10,
     letterSpacing: 0.6,
     textTransform: 'uppercase',
-  },
-  rowPayout: {
-    fontSize: 20,
-    fontWeight: '700',
-    letterSpacing: -0.3,
+    fontWeight: '600',
   },
   rowTitle: {
-    fontSize: 16,
-    lineHeight: 22,
-    fontWeight: '500',
+    fontSize: 15,
+    lineHeight: 20,
+    fontWeight: '600',
   },
-  rowMeta: {
+  rowFoot: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    paddingTop: 2,
+  },
+  rowFootLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    flex: 1,
     flexWrap: 'wrap',
   },
-  rowMetaText: {
-    fontSize: 12,
+  rowFootText: {
+    fontSize: 11,
+    letterSpacing: 0.2,
   },
-  rowDot: {
-    fontSize: 12,
+  payoutTag: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignSelf: 'center',
+  },
+  payoutText: {
+    fontSize: 13,
+    fontWeight: '700',
+    letterSpacing: -0.2,
   },
   empty: {
     fontSize: 13,
     textAlign: 'center',
     paddingVertical: 60,
-  },
-  fab: {
-    position: 'absolute',
-    bottom: 28,
-    alignSelf: 'center',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 22,
-    paddingVertical: 12,
-    borderRadius: 999,
-  },
-  fabText: {
-    fontWeight: '600',
-    fontSize: 14,
-    letterSpacing: 0.1,
   },
 });

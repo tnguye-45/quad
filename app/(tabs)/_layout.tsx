@@ -1,56 +1,20 @@
 import { Tabs } from 'expo-router';
 import React from 'react';
 
-import { HapticTab } from '@/components/haptic-tab';
-import { IconSymbol } from '@/components/ui/icon-symbol';
-import { Colors } from '@/constants/theme';
-import { useColorScheme } from '@/hooks/use-color-scheme';
+import { AppTabBar } from '@/components/app-tab-bar';
 
 export default function TabLayout() {
-  const colorScheme = useColorScheme();
-
   return (
     <Tabs
+      tabBar={(props) => <AppTabBar {...props} />}
       screenOptions={{
-        tabBarActiveTintColor: Colors[colorScheme ?? 'light'].tint,
         headerShown: false,
-        tabBarButton: HapticTab,
       }}>
-      <Tabs.Screen
-        name="index"
-        options={{
-          title: 'Gigs',
-          tabBarIcon: ({ color }) => <IconSymbol size={24} name="briefcase.fill" color={color} />,
-        }}
-      />
-      <Tabs.Screen
-        name="map"
-        options={{
-          title: 'Map',
-          tabBarIcon: ({ color }) => <IconSymbol size={26} name="map.fill" color={color} />,
-        }}
-      />
-      <Tabs.Screen
-        name="voices"
-        options={{
-          title: 'Voices',
-          tabBarIcon: ({ color }) => <IconSymbol size={24} name="text.bubble.fill" color={color} />,
-        }}
-      />
-      <Tabs.Screen
-        name="explore"
-        options={{
-          title: 'Hangouts',
-          tabBarIcon: ({ color }) => <IconSymbol size={24} name="person.3.fill" color={color} />,
-        }}
-      />
-      <Tabs.Screen
-        name="messages"
-        options={{
-          title: 'Messages',
-          tabBarIcon: ({ color }) => <IconSymbol size={24} name="message.fill" color={color} />,
-        }}
-      />
+      <Tabs.Screen name="index" options={{ title: 'Gigs' }} />
+      <Tabs.Screen name="voices" options={{ title: 'Voices' }} />
+      <Tabs.Screen name="explore" options={{ title: 'Hangouts' }} />
+      <Tabs.Screen name="messages" options={{ title: 'Messages' }} />
+      <Tabs.Screen name="map" options={{ title: 'Map', href: null }} />
     </Tabs>
   );
 }

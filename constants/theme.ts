@@ -1,33 +1,43 @@
 /**
- * App color tokens. Clean grey/white palette.
+ * App color tokens. Notre Dame palette: gold accent on warm cream + navy text.
  */
 
 import { Platform } from 'react-native';
 
 export const Colors = {
   light: {
-    text: '#111827',
-    textSecondary: '#6b7280',
-    background: '#fafafa',
-    card: '#ffffff',
-    border: '#e5e7eb',
-    subtle: '#f3f4f6',
-    tint: '#111827',
-    icon: '#6b7280',
-    tabIconDefault: '#9ca3af',
-    tabIconSelected: '#111827',
+    text: '#0C2340',
+    textSecondary: '#5D6B85',
+    textMuted: '#9CA5B5',
+    background: '#FBF8F1',
+    surface: '#F6F1E4',
+    card: '#FFFDF6',
+    border: '#E8DFC9',
+    borderStrong: '#D4C6A5',
+    subtle: '#F2EBD9',
+    tint: '#0C2340',
+    accent: '#C99700',
+    danger: '#B83C2E',
+    icon: '#5D6B85',
+    tabIconDefault: '#9CA5B5',
+    tabIconSelected: '#0C2340',
   },
   dark: {
-    text: '#fafafa',
-    textSecondary: '#a3a3a3',
-    background: '#0a0a0a',
-    card: '#171717',
-    border: '#262626',
-    subtle: '#262626',
-    tint: '#fafafa',
-    icon: '#a3a3a3',
-    tabIconDefault: '#737373',
-    tabIconSelected: '#fafafa',
+    text: '#FBF8F1',
+    textSecondary: '#B8BFCD',
+    textMuted: '#6E7A93',
+    background: '#0A1A2E',
+    surface: '#0F2238',
+    card: '#142A44',
+    border: '#1F3552',
+    borderStrong: '#37496A',
+    subtle: '#142A44',
+    tint: '#FBF8F1',
+    accent: '#E0B040',
+    danger: '#EF6B5A',
+    icon: '#B8BFCD',
+    tabIconDefault: '#6E7A93',
+    tabIconSelected: '#E0B040',
   },
 };
 

@@ -1,7 +1,7 @@
 import { router } from 'expo-router';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
-import { NamePlaque } from '@/components/logo';
+import { ScreenHeader } from '@/components/screen-header';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Colors } from '@/constants/theme';
@@ -17,13 +17,14 @@ type MockConvo = {
   preview: string;
   time: string;
   unread?: boolean;
+  active?: boolean;
 };
 
 const MOCK_CONVOS: MockConvo[] = [
-  { id: 'marcus', name: 'Marcus K.', initials: 'MK', context: 'Help moving a couch · $40', preview: 'Sounds good! See you at 3', time: '12m', unread: true },
-  { id: 'priya', name: 'Priya S.', initials: 'PS', context: 'SBN airport ride · $15', preview: 'I can grab you from Dillon', time: '1h', unread: true },
+  { id: 'marcus', name: 'Marcus K.', initials: 'MK', context: 'Help moving a couch · $40', preview: 'Sounds good! See you at 3', time: '12m', unread: true, active: true },
+  { id: 'priya', name: 'Priya S.', initials: 'PS', context: 'SBN airport ride · $15', preview: 'I can grab you from Dillon', time: '1h', unread: true, active: true },
   { id: 'jordan', name: 'Jordan L.', initials: 'JL', context: 'MATH 10560 tutor · $30/hr', preview: 'Want to meet at Hesburgh tonight?', time: '3h' },
-  { id: 'cse-cram', name: 'CSE 20110 cram', initials: 'CS', context: 'Hangout · 4 people', preview: 'Bringing snacks', time: '5h' },
+  { id: 'cse-cram', name: 'CSE 20110 cram', initials: 'CS', context: 'Hangout · 4 people', preview: 'Bringing snacks', time: '5h', active: true },
   { id: 'aisha', name: 'Aisha M.', initials: 'AM', context: 'Senior portraits · $80', preview: 'Sent you a few sample shots', time: '1d' },
   { id: 'sam', name: 'Sam R.', initials: 'SR', context: 'Dog walk · $15', preview: 'Thanks again — Bagel loved it', time: '2d' },
 ];
@@ -54,19 +55,54 @@ export default function MessagesScreen() {
     ? conversations.filter((co) => co.unread).length
     : MOCK_CONVOS.filter((co) => co.unread).length;
 
+  const activeNow = useReal
+    ? items.slice(0, 4)
+    : MOCK_CONVOS.filter((co) => co.active).slice(0, 6);
+
   return (
     <ThemedView style={[styles.screen, { backgroundColor: c.background }]}>
-      <View style={styles.header}>
-        <NamePlaque size="sm" />
-        <ThemedText style={[styles.title, { color: c.text }]}>Messages</ThemedText>
-        <ThemedText style={[styles.eyebrow, { color: c.textSecondary }]}>
-          {unreadCount} unread · {items.length} total
-        </ThemedText>
-      </View>
+      <ScreenHeader
+        title="Messages"
+        subtitle={`${unreadCount} unread · ${items.length} total`}
+      />
 
       {useReal && error ? (
-        <ThemedText style={[styles.error, { color: '#dc2626' }]}>{error}</ThemedText>
+        <ThemedText style={[styles.error, { color: c.danger }]}>{error}</ThemedText>
       ) : null}
+
+      {activeNow.length > 0 && (
+        <View style={[styles.activeWrap, { borderBottomColor: c.border }]}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.activeRow}>
+            {activeNow.map((co) => {
+              const isReal = '__real' in co;
+              const name = isReal ? co.partnerName : co.name;
+              const initials = isReal ? co.partnerInitials : co.initials;
+              return (
+                <Pressable
+                  key={co.id}
+                  onPress={() => router.push(`/chat/${co.id}` as never)}
+                  hitSlop={4}
+                  style={styles.activeItem}>
+                  <View style={[styles.activeAvatar, { borderColor: c.borderStrong, backgroundColor: c.subtle }]}>
+                    <ThemedText style={[styles.activeInitials, { color: c.text }]}>
+                      {initials}
+                    </ThemedText>
+                    <View style={[styles.activeDot, { backgroundColor: '#22c55e', borderColor: c.background }]} />
+                  </View>
+                  <ThemedText
+                    style={[styles.activeName, { color: c.text }]}
+                    numberOfLines={1}>
+                    {(name || '').split(' ')[0]}
+                  </ThemedText>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+        </View>
+      )}
 
       {useReal && loading && items.length === 0 ? (
         <View style={styles.emptyBlock}>
@@ -87,7 +123,7 @@ export default function MessagesScreen() {
         <ScrollView
           contentContainerStyle={styles.list}
           showsVerticalScrollIndicator={false}>
-          {items.map((co, i) => {
+          {items.map((co) => {
             const isReal = '__real' in co;
             const name = isReal ? co.partnerName : co.name;
             const initials = isReal ? co.partnerInitials : co.initials;
@@ -101,13 +137,9 @@ export default function MessagesScreen() {
                 onPress={() => router.push(`/chat/${co.id}` as never)}
                 style={({ pressed }) => [
                   styles.row,
-                  {
-                    borderTopColor: c.border,
-                    borderTopWidth: i === 0 ? 0 : StyleSheet.hairlineWidth,
-                    opacity: pressed ? 0.5 : 1,
-                  },
+                  { opacity: pressed ? 0.5 : 1 },
                 ]}>
-                <View style={[styles.avatar, { borderColor: c.border }]}>
+                <View style={[styles.avatar, { borderColor: c.border, backgroundColor: c.subtle }]}>
                   <ThemedText style={[styles.avatarText, { color: c.text }]}>
                     {initials}
                   </ThemedText>
@@ -115,15 +147,22 @@ export default function MessagesScreen() {
 
                 <View style={styles.rowMain}>
                   <View style={styles.rowTop}>
-                    <ThemedText style={[styles.name, { color: c.text }]} numberOfLines={1}>
+                    <ThemedText
+                      style={[
+                        styles.name,
+                        { color: c.text },
+                        unread && styles.nameUnread,
+                      ]}
+                      numberOfLines={1}>
                       {name}
                     </ThemedText>
-                    <ThemedText style={[styles.time, { color: c.textSecondary }]}>
+                    <ThemedText style={[styles.time, { color: c.textMuted }]} type="mono">
                       {time}
                     </ThemedText>
                   </View>
                   <ThemedText
-                    style={[styles.context, { color: c.textSecondary }]}
+                    style={[styles.context, { color: c.textMuted }]}
+                    type="mono"
                     numberOfLines={1}>
                     {context}
                   </ThemedText>
@@ -137,7 +176,7 @@ export default function MessagesScreen() {
                       ]}>
                       {preview}
                     </ThemedText>
-                    {unread && <View style={[styles.unreadDot, { backgroundColor: c.tint }]} />}
+                    {unread && <View style={[styles.unreadDot, { backgroundColor: c.accent }]} />}
                   </View>
                 </View>
               </Pressable>
@@ -153,48 +192,72 @@ export default function MessagesScreen() {
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    paddingTop: 60,
   },
-  header: {
+  activeWrap: {
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  activeRow: {
     paddingHorizontal: 20,
-    paddingBottom: 20,
-    gap: 14,
+    paddingVertical: 14,
+    gap: 16,
   },
-  title: {
-    fontSize: 28,
+  activeItem: {
+    alignItems: 'center',
+    gap: 6,
+    width: 64,
+  },
+  activeAvatar: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    borderWidth: 1.5,
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+  },
+  activeInitials: {
+    fontSize: 14,
     fontWeight: '700',
-    letterSpacing: -0.6,
-    lineHeight: 32,
   },
-  eyebrow: {
-    fontSize: 12,
-    letterSpacing: 0.2,
-    marginTop: -6,
+  activeDot: {
+    position: 'absolute',
+    bottom: 0,
+    right: 2,
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    borderWidth: 2,
+  },
+  activeName: {
+    fontSize: 11,
+    fontWeight: '500',
   },
   list: {
-    paddingHorizontal: 20,
+    paddingHorizontal: 0,
+    paddingTop: 4,
   },
   row: {
     flexDirection: 'row',
-    paddingVertical: 16,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
     gap: 14,
-    alignItems: 'flex-start',
+    alignItems: 'center',
   },
   avatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
     borderWidth: StyleSheet.hairlineWidth,
     alignItems: 'center',
     justifyContent: 'center',
   },
   avatarText: {
-    fontSize: 12,
-    fontWeight: '600',
+    fontSize: 14,
+    fontWeight: '700',
   },
   rowMain: {
     flex: 1,
-    gap: 3,
+    gap: 2,
   },
   rowTop: {
     flexDirection: 'row',
@@ -204,21 +267,27 @@ const styles = StyleSheet.create({
   },
   name: {
     fontSize: 15,
-    fontWeight: '600',
+    fontWeight: '500',
     flex: 1,
   },
+  nameUnread: {
+    fontWeight: '700',
+  },
   time: {
-    fontSize: 12,
+    fontSize: 11,
+    letterSpacing: 0.2,
   },
   context: {
-    fontSize: 12,
+    fontSize: 10,
+    letterSpacing: 0.3,
+    textTransform: 'lowercase',
   },
   rowBottom: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 10,
-    marginTop: 2,
+    marginTop: 1,
   },
   preview: {
     fontSize: 13,
@@ -229,9 +298,9 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   unreadDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 3.5,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
   },
   emptyBlock: {
     flex: 1,
@@ -246,7 +315,7 @@ const styles = StyleSheet.create({
   },
   emptyHeading: {
     fontSize: 18,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   emptyBody: {
     fontSize: 14,

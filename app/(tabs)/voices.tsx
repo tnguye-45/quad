@@ -1,8 +1,7 @@
-import { router } from 'expo-router';
 import { useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
-import { NamePlaque } from '@/components/logo';
+import { ScreenHeader } from '@/components/screen-header';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { IconSymbol } from '@/components/ui/icon-symbol';
@@ -33,15 +32,9 @@ export default function VoicesScreen() {
 
   return (
     <ThemedView style={[styles.screen, { backgroundColor: c.background }]}>
-      <View style={styles.header}>
-        <NamePlaque size="sm" />
-        <ThemedText style={[styles.title, { color: c.text }]}>Voices</ThemedText>
-        <ThemedText style={[styles.eyebrow, { color: c.textSecondary }]}>
-          anonymous · {voices.length} {voices.length === 1 ? 'voice' : 'voices'}
-        </ThemedText>
-      </View>
+      <ScreenHeader title="Voices" subtitle={`anonymous · ${voices.length} ${voices.length === 1 ? 'voice' : 'voices'}`} />
 
-      <View style={styles.filterRow}>
+      <View style={[styles.filterRow, { borderBottomColor: c.border }]}>
         {FILTERS.map((f) => {
           const active = f === filter;
           return (
@@ -49,18 +42,19 @@ export default function VoicesScreen() {
               <ThemedText
                 style={[
                   styles.filterText,
-                  { color: active ? c.text : c.textSecondary },
+                  { color: active ? c.text : c.textMuted },
                   active && styles.filterTextActive,
                 ]}>
                 {f.toLowerCase()}
               </ThemedText>
+              {active && <View style={[styles.filterUnderline, { backgroundColor: c.accent }]} />}
             </Pressable>
           );
         })}
       </View>
 
       <ScrollView
-        contentContainerStyle={[styles.list, { borderTopColor: c.border }]}
+        contentContainerStyle={styles.list}
         showsVerticalScrollIndicator={false}>
         {showLoading ? (
           <ThemedText style={[styles.empty, { color: c.textSecondary }]}>
@@ -71,42 +65,29 @@ export default function VoicesScreen() {
             No voices yet — be the first to speak.
           </ThemedText>
         ) : (
-          ordered.map((v, i) => (
-            <VoiceRow
+          ordered.map((v) => (
+            <VoiceCard
               key={v.id}
               voice={v}
               c={c}
               onVote={(d) => voteVoice(v.id, d)}
-              isFirst={i === 0}
             />
           ))
         )}
         <View style={{ height: 120 }} />
       </ScrollView>
-
-      <Pressable
-        style={({ pressed }) => [
-          styles.fab,
-          { backgroundColor: c.tint, opacity: pressed ? 0.85 : 1 },
-        ]}
-        onPress={() => router.push('/post-voice')}>
-        <IconSymbol name="plus" size={16} color={c.background} />
-        <ThemedText style={[styles.fabText, { color: c.background }]}>Speak</ThemedText>
-      </Pressable>
     </ThemedView>
   );
 }
 
-function VoiceRow({
+function VoiceCard({
   voice,
   c,
   onVote,
-  isFirst,
 }: {
   voice: Voice;
   c: (typeof Colors)['light'];
   onVote: (delta: 1 | -1 | 0) => void;
-  isFirst: boolean;
 }) {
   const [vote, setVote] = useState<0 | 1 | -1>(0);
   const score = voice.votes;
@@ -127,65 +108,79 @@ function VoiceRow({
     setVote(next);
   };
 
+  const scoreColor =
+    vote === 1 ? c.accent : vote === -1 ? c.textSecondary : c.textSecondary;
+
   return (
-    <View
-      style={[
-        styles.row,
-        {
-          borderTopColor: c.border,
-          borderTopWidth: isFirst ? 0 : StyleSheet.hairlineWidth,
-        },
-      ]}>
-      <View style={styles.rowTop}>
-        <View style={styles.topicGroup}>
-          <ThemedText style={styles.topicEmoji}>{VOICE_TOPIC_EMOJI[voice.topic]}</ThemedText>
-          <ThemedText style={[styles.topicText, { color: c.textSecondary }]}>
-            {voice.topic.toLowerCase()}
-          </ThemedText>
-        </View>
-        <ThemedText style={[styles.timeText, { color: c.textSecondary }]}>
-          {voice.postedAgo || timeAgo(voice.postedAt)}
+    <View style={[styles.card, { borderBottomColor: c.border }]}>
+      <View style={styles.voteRail}>
+        <Pressable
+          onPress={press(1)}
+          hitSlop={10}
+          style={({ pressed }) => [
+            styles.voteBtn,
+            vote === 1 && { backgroundColor: c.subtle },
+            { opacity: pressed ? 0.5 : 1 },
+          ]}>
+          <IconSymbol
+            name="chevron.up"
+            size={18}
+            color={vote === 1 ? c.accent : c.textMuted}
+          />
+        </Pressable>
+        <ThemedText
+          style={[styles.voteScore, { color: scoreColor }]}
+          type="mono">
+          {score > 0 ? `+${score}` : score === 0 ? '0' : score}
         </ThemedText>
+        <Pressable
+          onPress={press(-1)}
+          hitSlop={10}
+          style={({ pressed }) => [
+            styles.voteBtn,
+            vote === -1 && { backgroundColor: c.subtle },
+            { opacity: pressed ? 0.5 : 1 },
+          ]}>
+          <IconSymbol
+            name="chevron.down"
+            size={18}
+            color={vote === -1 ? c.text : c.textMuted}
+          />
+        </Pressable>
       </View>
 
-      <ThemedText style={[styles.body, { color: c.text }]}>{voice.body}</ThemedText>
-
-      <View style={styles.rowFoot}>
-        <View style={styles.voteGroup}>
-          <Pressable
-            onPress={press(1)}
-            hitSlop={8}
-            style={({ pressed }) => [styles.voteBtn, pressed && { opacity: 0.4 }]}>
-            <IconSymbol
-              name="chevron.up"
-              size={16}
-              color={vote === 1 ? c.text : c.textSecondary}
-            />
-          </Pressable>
-          <ThemedText
-            style={[
-              styles.voteCount,
-              { color: vote !== 0 ? c.text : c.textSecondary },
-            ]}>
-            {score > 0 ? `+${score}` : score}
+      <View style={styles.cardMain}>
+        <View style={styles.cardTop}>
+          <View style={styles.topicGroup}>
+            <ThemedText style={styles.topicEmoji}>{VOICE_TOPIC_EMOJI[voice.topic]}</ThemedText>
+            <ThemedText style={[styles.topicText, { color: c.textSecondary }]} type="mono">
+              {voice.topic.toLowerCase()}
+            </ThemedText>
+          </View>
+          <ThemedText style={[styles.timeText, { color: c.textMuted }]} type="mono">
+            {voice.postedAgo || timeAgo(voice.postedAt)}
           </ThemedText>
-          <Pressable
-            onPress={press(-1)}
-            hitSlop={8}
-            style={({ pressed }) => [styles.voteBtn, pressed && { opacity: 0.4 }]}>
-            <IconSymbol
-              name="chevron.down"
-              size={16}
-              color={vote === -1 ? c.text : c.textSecondary}
-            />
-          </Pressable>
         </View>
 
-        <View style={styles.commentGroup}>
-          <IconSymbol name="bubble.right" size={13} color={c.textSecondary} />
-          <ThemedText style={[styles.commentCount, { color: c.textSecondary }]}>
-            {voice.comments}
-          </ThemedText>
+        <ThemedText style={[styles.body, { color: c.text }]}>{voice.body}</ThemedText>
+
+        <View style={styles.cardFoot}>
+          <View style={styles.footAction}>
+            <IconSymbol name="bubble.right" size={14} color={c.textMuted} />
+            <ThemedText style={[styles.footActionText, { color: c.textMuted }]} type="mono">
+              {voice.comments}
+            </ThemedText>
+          </View>
+          <View style={styles.footAction}>
+            <IconSymbol name="square.and.arrow.up" size={14} color={c.textMuted} />
+            <ThemedText style={[styles.footActionText, { color: c.textMuted }]} type="mono">
+              share
+            </ThemedText>
+          </View>
+          <View style={{ flex: 1 }} />
+          <Pressable hitSlop={6} style={({ pressed }) => [{ opacity: pressed ? 0.5 : 1 }]}>
+            <IconSymbol name="ellipsis" size={16} color={c.textMuted} />
+          </Pressable>
         </View>
       </View>
     </View>
@@ -206,49 +201,66 @@ function timeAgo(ts: number): string {
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    paddingTop: 60,
-  },
-  header: {
-    paddingHorizontal: 20,
-    paddingBottom: 24,
-    gap: 14,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: '700',
-    letterSpacing: -0.6,
-    lineHeight: 32,
-  },
-  eyebrow: {
-    fontSize: 12,
-    letterSpacing: 0.2,
-    marginTop: -6,
   },
   filterRow: {
     flexDirection: 'row',
     paddingHorizontal: 20,
-    gap: 18,
-    paddingBottom: 8,
+    gap: 22,
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
   filterChip: {
-    paddingVertical: 6,
+    paddingVertical: 12,
+    position: 'relative',
   },
   filterText: {
     fontSize: 13,
-    letterSpacing: 0.1,
+    letterSpacing: 0.4,
+    textTransform: 'uppercase',
+    fontWeight: '500',
   },
   filterTextActive: {
-    fontWeight: '600',
+    fontWeight: '700',
+  },
+  filterUnderline: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: -StyleSheet.hairlineWidth,
+    height: 2,
   },
   list: {
+    paddingHorizontal: 0,
+  },
+  card: {
+    flexDirection: 'row',
     paddingHorizontal: 20,
-    marginTop: 4,
+    paddingVertical: 18,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    gap: 14,
   },
-  row: {
-    paddingVertical: 20,
-    gap: 12,
+  voteRail: {
+    width: 36,
+    alignItems: 'center',
+    gap: 4,
+    paddingTop: 2,
   },
-  rowTop: {
+  voteBtn: {
+    width: 32,
+    height: 28,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  voteScore: {
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 0.2,
+  },
+  cardMain: {
+    flex: 1,
+    gap: 10,
+  },
+  cardTop: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
@@ -262,66 +274,37 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
   topicText: {
-    fontSize: 11,
-    fontWeight: '600',
-    letterSpacing: 0.6,
+    fontSize: 10,
+    letterSpacing: 0.8,
     textTransform: 'uppercase',
+    fontWeight: '600',
   },
   timeText: {
-    fontSize: 12,
+    fontSize: 11,
+    letterSpacing: 0.2,
   },
   body: {
     fontSize: 15,
     lineHeight: 22,
   },
-  rowFoot: {
+  cardFoot: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingTop: 4,
+    gap: 18,
+    paddingTop: 2,
   },
-  voteGroup: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  voteBtn: {
-    paddingVertical: 4,
-    paddingHorizontal: 4,
-  },
-  voteCount: {
-    fontSize: 13,
-    fontWeight: '600',
-    minWidth: 32,
-    textAlign: 'center',
-  },
-  commentGroup: {
+  footAction: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
   },
-  commentCount: {
-    fontSize: 12,
+  footActionText: {
+    fontSize: 11,
+    letterSpacing: 0.4,
   },
   empty: {
     fontSize: 13,
     textAlign: 'center',
     paddingVertical: 60,
-  },
-  fab: {
-    position: 'absolute',
-    bottom: 28,
-    alignSelf: 'center',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 22,
-    paddingVertical: 12,
-    borderRadius: 999,
-  },
-  fabText: {
-    fontWeight: '600',
-    fontSize: 14,
-    letterSpacing: 0.1,
   },
 });

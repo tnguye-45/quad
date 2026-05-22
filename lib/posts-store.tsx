@@ -597,17 +597,15 @@ export function PostsProvider({ children }: { children: ReactNode }) {
       previous ?? null;
     if (next === null) {
       myVoteRef.current.delete(id);
-      await supabase
-        .from('voice_votes')
-        .delete()
-        .eq('voice_id', id)
-        .eq('user_id', session!.user.id);
     } else {
       myVoteRef.current.set(id, next);
-      await supabase
-        .from('voice_votes')
-        .upsert({ voice_id: id, user_id: session!.user.id, value: next });
     }
+    // Single atomic RPC — `set_voice_vote` handles delete vs upsert in one
+    // transaction so rapid up→down taps can't reorder server-side.
+    await supabase.rpc('set_voice_vote', {
+      p_voice_id: id,
+      p_value: next ?? 0,
+    });
   }
 
   const value = useMemo<Store>(

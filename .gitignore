@@ -38,6 +38,10 @@ yarn-error.*
 # typescript
 *.tsbuildinfo
 
+# local tooling / scratch
+.claude/
+.verify/
+
 app-example
 
 # generated native folders

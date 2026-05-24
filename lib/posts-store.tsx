@@ -52,6 +52,7 @@ export type Gig = {
   postedAgo: string;
   posterName: string | null;
   posterInitials: string | null;
+  posterAvatarUrl: string | null;
 };
 
 export type Hangout = {
@@ -67,6 +68,7 @@ export type Hangout = {
   postedAt: number;
   hostName: string | null;
   hostInitials: string | null;
+  hostAvatarUrl: string | null;
 };
 
 export type Voice = {
@@ -81,6 +83,7 @@ export type Voice = {
   postedAgo: string;
   posterName: string | null;
   posterInitials: string | null;
+  posterAvatarUrl: string | null;
 };
 
 // Seeds shown in dev mode only — when the user opts into the fake "admin"
@@ -90,29 +93,29 @@ const MIN = 60_000;
 const HR = 60 * MIN;
 
 const SEED_GIGS: Gig[] = [
-  { id: 'seed-g-1', ownerId: SEED_OWNER, anonymous: false, title: 'Help moving a couch up 3 flights', payout: '$40', category: 'Moving', where: 'Dillon Hall · 0.4 mi', postedAt: NOW - 12 * MIN, postedAgo: '12 min ago', posterName: 'Marcus K.', posterInitials: 'MK' },
-  { id: 'seed-g-2', ownerId: SEED_OWNER, anonymous: false, title: 'Need a ride to South Bend airport Sat 6am', payout: '$15', category: 'Rideshare', where: 'SBN · 4 mi', postedAt: NOW - HR, postedAgo: '1h ago', posterName: 'Priya S.', posterInitials: 'PS' },
-  { id: 'seed-g-3', ownerId: SEED_OWNER, anonymous: false, title: 'MATH 10560 tutor for midterm prep', payout: '$30/hr', category: 'Tutoring', where: 'Hesburgh Library', postedAt: NOW - 2 * HR, postedAgo: '2h ago', posterName: 'Jordan L.', posterInitials: 'JL' },
-  { id: 'seed-g-4', ownerId: SEED_OWNER, anonymous: false, title: 'Walk my dog this weekend', payout: '$15', category: 'Pets', where: 'Sorin College · 0.2 mi', postedAt: NOW - 3 * HR, postedAgo: '3h ago', posterName: 'Sam R.', posterInitials: 'SR' },
-  { id: 'seed-g-5', ownerId: SEED_OWNER, anonymous: false, title: 'Photographer for senior portraits at the Dome', payout: '$80', category: 'Creative', where: 'Main Building · 0.6 mi', postedAt: NOW - 5 * HR, postedAgo: '5h ago', posterName: 'Aisha M.', posterInitials: 'AM' },
-  { id: 'seed-g-6', ownerId: SEED_OWNER, anonymous: false, title: 'Pick up Amazon package & drop it at my dorm', payout: '$8', category: 'Errands', where: 'LaFortune · 0.3 mi', postedAt: NOW - 24 * HR, postedAgo: 'yesterday', posterName: 'Tyler J.', posterInitials: 'TJ' },
+  { id: 'seed-g-1', ownerId: SEED_OWNER, anonymous: false, title: 'Help moving a couch up 3 flights', payout: '$40', category: 'Moving', where: 'Dillon Hall · 0.4 mi', postedAt: NOW - 12 * MIN, postedAgo: '12 min ago', posterName: 'Marcus K.', posterInitials: 'MK', posterAvatarUrl: null },
+  { id: 'seed-g-2', ownerId: SEED_OWNER, anonymous: false, title: 'Need a ride to South Bend airport Sat 6am', payout: '$15', category: 'Rideshare', where: 'SBN · 4 mi', postedAt: NOW - HR, postedAgo: '1h ago', posterName: 'Priya S.', posterInitials: 'PS', posterAvatarUrl: null },
+  { id: 'seed-g-3', ownerId: SEED_OWNER, anonymous: false, title: 'MATH 10560 tutor for midterm prep', payout: '$30/hr', category: 'Tutoring', where: 'Hesburgh Library', postedAt: NOW - 2 * HR, postedAgo: '2h ago', posterName: 'Jordan L.', posterInitials: 'JL', posterAvatarUrl: null },
+  { id: 'seed-g-4', ownerId: SEED_OWNER, anonymous: false, title: 'Walk my dog this weekend', payout: '$15', category: 'Pets', where: 'Sorin College · 0.2 mi', postedAt: NOW - 3 * HR, postedAgo: '3h ago', posterName: 'Sam R.', posterInitials: 'SR', posterAvatarUrl: null },
+  { id: 'seed-g-5', ownerId: SEED_OWNER, anonymous: false, title: 'Photographer for senior portraits at the Dome', payout: '$80', category: 'Creative', where: 'Main Building · 0.6 mi', postedAt: NOW - 5 * HR, postedAgo: '5h ago', posterName: 'Aisha M.', posterInitials: 'AM', posterAvatarUrl: null },
+  { id: 'seed-g-6', ownerId: SEED_OWNER, anonymous: false, title: 'Pick up Amazon package & drop it at my dorm', payout: '$8', category: 'Errands', where: 'LaFortune · 0.3 mi', postedAt: NOW - 24 * HR, postedAgo: 'yesterday', posterName: 'Tyler J.', posterInitials: 'TJ', posterAvatarUrl: null },
 ];
 
 const SEED_HANGOUTS: Hangout[] = [
-  { id: 'seed-h-1', ownerId: SEED_OWNER, anonymous: false, title: 'CSE 20110 midterm cram session', when: 'Tonight · 8:00 PM', where: 'Hesburgh Library, 2nd floor', going: 4, vibe: 'Study', postedAt: NOW - 2 * HR, hostName: 'Jordan L.', hostInitials: 'JL' },
-  { id: 'seed-h-2', ownerId: SEED_OWNER, anonymous: false, title: 'Pickup basketball — all skill levels', when: 'Sat · 3:00 PM', where: 'Rolfs Sports Recreation Center', going: 8, vibe: 'Sports', postedAt: NOW - 5 * HR, hostName: 'Tyler J.', hostInitials: 'TJ' },
-  { id: 'seed-h-3', ownerId: SEED_OWNER, anonymous: false, title: 'South Dining Hall dinner', when: 'Tonight · 6:30 PM', where: 'South Dining Hall', going: 3, vibe: 'Food', postedAt: NOW - 4 * HR, hostName: 'Aisha M.', hostInitials: 'AM' },
-  { id: 'seed-h-4', ownerId: SEED_OWNER, anonymous: false, title: 'Coffee run @ Hagerty', when: 'Tomorrow · 4:00 PM', where: 'Hagerty Family Café, DPAC', going: 2, vibe: 'Social', postedAt: NOW - 7 * HR, hostName: 'Sam R.', hostInitials: 'SR' },
-  { id: 'seed-h-5', ownerId: SEED_OWNER, anonymous: false, title: 'Sunset run around the lakes', when: 'Sun · 6:15 PM', where: "St. Joseph's Lake trail", going: 5, vibe: 'Sports', postedAt: NOW - 9 * HR, hostName: 'Priya S.', hostInitials: 'PS' },
+  { id: 'seed-h-1', ownerId: SEED_OWNER, anonymous: false, title: 'CSE 20110 midterm cram session', when: 'Tonight · 8:00 PM', where: 'Hesburgh Library, 2nd floor', going: 4, vibe: 'Study', postedAt: NOW - 2 * HR, hostName: 'Jordan L.', hostInitials: 'JL', hostAvatarUrl: null },
+  { id: 'seed-h-2', ownerId: SEED_OWNER, anonymous: false, title: 'Pickup basketball — all skill levels', when: 'Sat · 3:00 PM', where: 'Rolfs Sports Recreation Center', going: 8, vibe: 'Sports', postedAt: NOW - 5 * HR, hostName: 'Tyler J.', hostInitials: 'TJ', hostAvatarUrl: null },
+  { id: 'seed-h-3', ownerId: SEED_OWNER, anonymous: false, title: 'South Dining Hall dinner', when: 'Tonight · 6:30 PM', where: 'South Dining Hall', going: 3, vibe: 'Food', postedAt: NOW - 4 * HR, hostName: 'Aisha M.', hostInitials: 'AM', hostAvatarUrl: null },
+  { id: 'seed-h-4', ownerId: SEED_OWNER, anonymous: false, title: 'Coffee run @ Hagerty', when: 'Tomorrow · 4:00 PM', where: 'Hagerty Family Café, DPAC', going: 2, vibe: 'Social', postedAt: NOW - 7 * HR, hostName: 'Sam R.', hostInitials: 'SR', hostAvatarUrl: null },
+  { id: 'seed-h-5', ownerId: SEED_OWNER, anonymous: false, title: 'Sunset run around the lakes', when: 'Sun · 6:15 PM', where: "St. Joseph's Lake trail", going: 5, vibe: 'Sports', postedAt: NOW - 9 * HR, hostName: 'Priya S.', hostInitials: 'PS', hostAvatarUrl: null },
 ];
 
 const SEED_VOICES: Voice[] = [
-  { id: 'seed-v-1', ownerId: SEED_OWNER, anonymous: true, body: 'south dining hall is straight up unhinged today. why is the line wrapping outside.', topic: 'Dining', votes: 142, comments: 23, postedAt: NOW - 12 * MIN, postedAgo: '12m', posterName: null, posterInitials: null },
-  { id: 'seed-v-2', ownerId: SEED_OWNER, anonymous: true, body: "to whoever left their hydroflask in DeBartolo 138, i'll bring it tomorrow at 9am. don't leak my information", topic: 'Class', votes: 89, comments: 5, postedAt: NOW - 34 * MIN, postedAgo: '34m', posterName: null, posterInitials: null },
-  { id: 'seed-v-3', ownerId: SEED_OWNER, anonymous: true, body: 'petition to make the leprechaun mascot scream less during football games', topic: 'Sports', votes: -12, comments: 47, postedAt: NOW - HR, postedAgo: '1h', posterName: null, posterInitials: null },
-  { id: 'seed-v-4', ownerId: SEED_OWNER, anonymous: true, body: 'got asked out at the grotto today and i genuinely do not know how to feel', topic: 'Random', votes: 318, comments: 56, postedAt: NOW - 2 * HR, postedAgo: '2h', posterName: null, posterInitials: null },
-  { id: 'seed-v-5', ownerId: SEED_OWNER, anonymous: true, body: 'Hesburgh 24-hour room is the realest place on campus at 3am. iykyk', topic: 'Class', votes: 204, comments: 12, postedAt: NOW - 3 * HR, postedAgo: '3h', posterName: null, posterInitials: null },
-  { id: 'seed-v-6', ownerId: SEED_OWNER, anonymous: true, body: 'why does ND charge $9 for chicken tenders in the basket. it is gluttony pricing', topic: 'Dining', votes: 76, comments: 8, postedAt: NOW - 4 * HR, postedAgo: '4h', posterName: null, posterInitials: null },
+  { id: 'seed-v-1', ownerId: SEED_OWNER, anonymous: true, body: 'south dining hall is straight up unhinged today. why is the line wrapping outside.', topic: 'Dining', votes: 142, comments: 23, postedAt: NOW - 12 * MIN, postedAgo: '12m', posterName: null, posterInitials: null, posterAvatarUrl: null },
+  { id: 'seed-v-2', ownerId: SEED_OWNER, anonymous: true, body: "to whoever left their hydroflask in DeBartolo 138, i'll bring it tomorrow at 9am. don't leak my information", topic: 'Class', votes: 89, comments: 5, postedAt: NOW - 34 * MIN, postedAgo: '34m', posterName: null, posterInitials: null, posterAvatarUrl: null },
+  { id: 'seed-v-3', ownerId: SEED_OWNER, anonymous: true, body: 'petition to make the leprechaun mascot scream less during football games', topic: 'Sports', votes: -12, comments: 47, postedAt: NOW - HR, postedAgo: '1h', posterName: null, posterInitials: null, posterAvatarUrl: null },
+  { id: 'seed-v-4', ownerId: SEED_OWNER, anonymous: true, body: 'got asked out at the grotto today and i genuinely do not know how to feel', topic: 'Random', votes: 318, comments: 56, postedAt: NOW - 2 * HR, postedAgo: '2h', posterName: null, posterInitials: null, posterAvatarUrl: null },
+  { id: 'seed-v-5', ownerId: SEED_OWNER, anonymous: true, body: 'Hesburgh 24-hour room is the realest place on campus at 3am. iykyk', topic: 'Class', votes: 204, comments: 12, postedAt: NOW - 3 * HR, postedAgo: '3h', posterName: null, posterInitials: null, posterAvatarUrl: null },
+  { id: 'seed-v-6', ownerId: SEED_OWNER, anonymous: true, body: 'why does ND charge $9 for chicken tenders in the basket. it is gluttony pricing', topic: 'Dining', votes: 76, comments: 8, postedAt: NOW - 4 * HR, postedAgo: '4h', posterName: null, posterInitials: null, posterAvatarUrl: null },
 ];
 
 type AddGigInput = {
@@ -125,6 +128,7 @@ type AddGigInput = {
   ownerId: string;
   posterName: string | null;
   posterInitials: string | null;
+  posterAvatarUrl: string | null;
 };
 
 type AddHangoutInput = {
@@ -137,6 +141,7 @@ type AddHangoutInput = {
   ownerId: string;
   hostName: string | null;
   hostInitials: string | null;
+  hostAvatarUrl: string | null;
 };
 
 type AddVoiceInput = {
@@ -146,6 +151,7 @@ type AddVoiceInput = {
   ownerId: string;
   posterName: string | null;
   posterInitials: string | null;
+  posterAvatarUrl: string | null;
 };
 
 type Store = {
@@ -167,7 +173,11 @@ const PostsContext = createContext<Store | null>(null);
 
 // ─────────────────────── DB ↔ App mappers ───────────────────────
 
-type DbProfileEmbed = { display_name: string | null; initials: string | null } | null;
+type DbProfileEmbed = {
+  display_name: string | null;
+  initials: string | null;
+  avatar_url: string | null;
+} | null;
 
 function dollarsToCents(payout: string): number {
   const n = Number(payout.replace(/[^0-9.]/g, ''));
@@ -219,6 +229,7 @@ function gigFromDb(row: DbGigRow): Gig {
     postedAgo: timeAgo(row.posted_at),
     posterName: row.anonymous ? null : (row.poster?.display_name ?? null),
     posterInitials: row.anonymous ? null : (row.poster?.initials ?? null),
+    posterAvatarUrl: row.anonymous ? null : (row.poster?.avatar_url ?? null),
   };
 }
 
@@ -254,6 +265,7 @@ function hangoutFromDb(row: DbHangoutRow): Hangout {
     postedAt: new Date(row.created_at).getTime(),
     hostName: row.anonymous ? null : (row.host?.display_name ?? null),
     hostInitials: row.anonymous ? null : (row.host?.initials ?? null),
+    hostAvatarUrl: row.anonymous ? null : (row.host?.avatar_url ?? null),
   };
 }
 
@@ -281,15 +293,16 @@ function voiceFromDb(row: DbVoiceRow): Voice {
     postedAgo: timeAgo(row.posted_at),
     posterName: row.anonymous ? null : (row.author?.display_name ?? null),
     posterInitials: row.anonymous ? null : (row.author?.initials ?? null),
+    posterAvatarUrl: row.anonymous ? null : (row.author?.avatar_url ?? null),
   };
 }
 
 const GIG_SELECT =
-  '*, poster:profiles!gigs_poster_id_fkey(display_name, initials)';
+  '*, poster:profiles!gigs_poster_id_fkey(display_name, initials, avatar_url)';
 const HANGOUT_SELECT =
-  '*, host:profiles!hangouts_host_id_fkey(display_name, initials), hangout_attendees(count)';
+  '*, host:profiles!hangouts_host_id_fkey(display_name, initials, avatar_url), hangout_attendees(count)';
 const VOICE_SELECT =
-  '*, author:profiles!voices_author_id_fkey(display_name, initials)';
+  '*, author:profiles!voices_author_id_fkey(display_name, initials, avatar_url)';
 
 // ─────────────────────── Provider ───────────────────────
 
@@ -439,6 +452,7 @@ export function PostsProvider({ children }: { children: ReactNode }) {
         postedAgo: 'just now',
         posterName: input.anonymous ? null : input.posterName,
         posterInitials: input.anonymous ? null : input.posterInitials,
+        posterAvatarUrl: input.anonymous ? null : input.posterAvatarUrl,
       };
       setGigs((cur) => [optimistic, ...cur]);
       return;
@@ -483,6 +497,7 @@ export function PostsProvider({ children }: { children: ReactNode }) {
         postedAt: now,
         hostName: input.anonymous ? null : input.hostName,
         hostInitials: input.anonymous ? null : input.hostInitials,
+        hostAvatarUrl: input.anonymous ? null : input.hostAvatarUrl,
       };
       setHangouts((cur) => [optimistic, ...cur]);
       return;
@@ -534,6 +549,7 @@ export function PostsProvider({ children }: { children: ReactNode }) {
         postedAgo: 'just now',
         posterName: input.anonymous ? null : input.posterName,
         posterInitials: input.anonymous ? null : input.posterInitials,
+        posterAvatarUrl: input.anonymous ? null : input.posterAvatarUrl,
       };
       setVoices((cur) => [optimistic, ...cur]);
       return;

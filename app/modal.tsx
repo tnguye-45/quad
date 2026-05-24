@@ -2,6 +2,7 @@ import { router } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import { Linking, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
+import { Avatar } from '@/components/avatar';
 import { NamePlaque } from '@/components/logo';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -82,14 +83,8 @@ export default function MeModal() {
         </View>
 
         <View style={styles.profileBlock}>
-          <View
-            style={[
-              styles.avatar,
-              { backgroundColor: c.subtle, borderColor: c.borderStrong },
-            ]}>
-            <ThemedText style={[styles.avatarText, { color: c.text }]}>
-              {profile.initials || '?'}
-            </ThemedText>
+          <View style={styles.avatarWrap}>
+            <Avatar uri={profile.avatar_url} initials={profile.initials} size={88} />
           </View>
           <ThemedText style={[styles.name, { color: c.text }]}>
             {profile.display_name || 'No name yet'}
@@ -305,16 +300,7 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   profileBlock: { alignItems: 'center', gap: 6, paddingTop: 12 },
-  avatar: {
-    width: 88,
-    height: 88,
-    borderRadius: 44,
-    borderWidth: StyleSheet.hairlineWidth,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 10,
-  },
-  avatarText: { fontSize: 28, fontWeight: '700' },
+  avatarWrap: { marginBottom: 10 },
   name: {
     fontSize: 26,
     fontWeight: '800',

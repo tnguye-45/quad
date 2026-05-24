@@ -8,6 +8,7 @@ export type ConversationSummary = {
   contextLabel: string;     // "Re: Help moving a couch · $40" or "Hangout · 4 people"
   partnerName: string;      // counterpart's display name (or "Group · N")
   partnerInitials: string;
+  partnerAvatarUrl: string | null;
   preview: string;
   preview_at: number;
   unread: boolean;
@@ -20,9 +21,14 @@ export type Message = {
   sender_id: string;
   sender_name: string | null;
   sender_initials: string | null;
+  sender_avatar_url: string | null;
 };
 
-type ProfileEmbed = { display_name: string | null; initials: string | null } | null;
+type ProfileEmbed = {
+  display_name: string | null;
+  initials: string | null;
+  avatar_url: string | null;
+} | null;
 
 type GigEmbed = {
   title: string;
@@ -138,7 +144,7 @@ export function useConversations(): {
         supabase
           .from('conversation_members')
           .select(
-            'conversation_id, user_id, user:profiles!conversation_members_user_id_fkey(display_name, initials)',
+            'conversation_id, user_id, user:profiles!conversation_members_user_id_fkey(display_name, initials, avatar_url)',
           )
           .in('conversation_id', convIds)
           .neq('user_id', me),
@@ -170,9 +176,11 @@ export function useConversations(): {
         const last = lastByConv.get(m.conversation_id);
         let partnerName = partner?.user?.display_name ?? 'Unknown';
         let partnerInitials = partner?.user?.initials ?? '?';
+        let partnerAvatarUrl = partner?.user?.avatar_url ?? null;
         if (partners.length > 1) {
           partnerName = `Group · ${partners.length + 1} people`;
           partnerInitials = '··';
+          partnerAvatarUrl = null;
         }
         const lastReadAt = new Date(m.last_read_at).getTime();
         const lastMsgAt = last ? new Date(last.sent_at).getTime() : 0;
@@ -181,6 +189,7 @@ export function useConversations(): {
           contextLabel: contextLabelFor(conv),
           partnerName,
           partnerInitials,
+          partnerAvatarUrl,
           preview: last?.body ?? 'No messages yet — say hi.',
           preview_at: lastMsgAt,
           unread: !!last && last.sender_id !== me && lastMsgAt > lastReadAt,
@@ -221,6 +230,7 @@ export function useThread(conversationId: string | undefined): {
   conversation: ConversationRow | null;
   partnerName: string;
   partnerInitials: string;
+  partnerAvatarUrl: string | null;
   messages: Message[];
   loading: boolean;
   error: string | null;
@@ -232,6 +242,7 @@ export function useThread(conversationId: string | undefined): {
   const [messages, setMessages] = useState<Message[]>([]);
   const [partnerName, setPartnerName] = useState('Conversation');
   const [partnerInitials, setPartnerInitials] = useState('?');
+  const [partnerAvatarUrl, setPartnerAvatarUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -258,14 +269,14 @@ export function useThread(conversationId: string | undefined): {
           supabase
             .from('messages')
             .select(
-              'id, conversation_id, sender_id, body, sent_at, sender:profiles!messages_sender_id_fkey(display_name, initials)',
+              'id, conversation_id, sender_id, body, sent_at, sender:profiles!messages_sender_id_fkey(display_name, initials, avatar_url)',
             )
             .eq('conversation_id', conversationId)
             .order('sent_at', { ascending: true }),
           supabase
             .from('conversation_members')
             .select(
-              'user_id, user:profiles!conversation_members_user_id_fkey(display_name, initials)',
+              'user_id, user:profiles!conversation_members_user_id_fkey(display_name, initials, avatar_url)',
             )
             .eq('conversation_id', conversationId)
             .neq('user_id', session!.user.id),
@@ -283,6 +294,7 @@ export function useThread(conversationId: string | undefined): {
             sender_id: m.sender_id,
             sender_name: m.sender?.display_name ?? null,
             sender_initials: m.sender?.initials ?? null,
+            sender_avatar_url: m.sender?.avatar_url ?? null,
           })),
         );
         const partner = (partnerRes.data ?? [])[0] as unknown as
@@ -291,6 +303,7 @@ export function useThread(conversationId: string | undefined): {
         if (partner?.user) {
           setPartnerName(partner.user.display_name ?? 'Unknown');
           setPartnerInitials(partner.user.initials ?? '?');
+          setPartnerAvatarUrl(partner.user.avatar_url ?? null);
         }
         // Mark as read.
         await supabase
@@ -323,7 +336,7 @@ export function useThread(conversationId: string | undefined): {
           // Hydrate sender details — payload won't include the joined profile.
           const { data: senderRes } = await supabase
             .from('profiles')
-            .select('display_name, initials')
+            .select('display_name, initials, avatar_url')
             .eq('id', row.sender_id)
             .maybeSingle();
           if (!mounted) return;
@@ -338,6 +351,7 @@ export function useThread(conversationId: string | undefined): {
                 sender_id: row.sender_id,
                 sender_name: senderRes?.display_name ?? null,
                 sender_initials: senderRes?.initials ?? null,
+                sender_avatar_url: senderRes?.avatar_url ?? null,
               },
             ];
           });
@@ -372,13 +386,14 @@ export function useThread(conversationId: string | undefined): {
       conversation,
       partnerName,
       partnerInitials,
+      partnerAvatarUrl,
       messages,
       loading,
       error,
       send,
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [conversation, partnerName, partnerInitials, messages, loading, error],
+    [conversation, partnerName, partnerInitials, partnerAvatarUrl, messages, loading, error],
   );
 }
 

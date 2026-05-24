@@ -3,6 +3,7 @@ import { useMemo } from 'react';
 import { Platform, Pressable, StyleSheet, View } from 'react-native';
 
 import { NamePlaque } from '@/components/logo';
+import { NativeMap, type MapPin } from '@/components/native-map';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { IconSymbol } from '@/components/ui/icon-symbol';
@@ -10,13 +11,7 @@ import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { usePosts, type Gig, type Hangout } from '@/lib/posts-store';
 
-type Pin = {
-  lat: number;
-  lon: number;
-  title: string;
-  meta: string;
-  kind: 'gig' | 'hangout';
-};
+type Pin = MapPin;
 
 const CAMPUS_CENTER = { lat: 41.702, lon: -86.2375 };
 
@@ -61,6 +56,7 @@ function geocode(where: string, seedKey: string): { lat: number; lon: number } {
 function gigToPin(gig: Gig): Pin {
   const { lat, lon } = geocode(gig.where, gig.id);
   return {
+    id: `g-${gig.id}`,
     lat,
     lon,
     title: gig.title,
@@ -72,6 +68,7 @@ function gigToPin(gig: Gig): Pin {
 function hangoutToPin(h: Hangout): Pin {
   const { lat, lon } = geocode(h.where, h.id);
   return {
+    id: `h-${h.id}`,
     lat,
     lon,
     title: h.title,
@@ -171,18 +168,7 @@ export default function MapScreen() {
           }}
         />
       ) : (
-        <View style={[styles.placeholder, { backgroundColor: c.surface }]}>
-          <ThemedText style={[styles.placeholderEyebrow, { color: c.accent }]} type="mono">
-            map · coming soon
-          </ThemedText>
-          <ThemedText style={[styles.placeholderTitle, { color: c.text }]}>
-            Native map is on the way
-          </ThemedText>
-          <ThemedText style={[styles.placeholderBody, { color: c.textSecondary }]}>
-            For now, open quad on the web to see gigs and hangouts pinned on the
-            Notre Dame campus map.
-          </ThemedText>
-        </View>
+        <NativeMap pins={pins} />
       )}
 
       <View style={styles.topOverlay} pointerEvents="box-none">
@@ -247,32 +233,6 @@ export default function MapScreen() {
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-  },
-  placeholder: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 10,
-    paddingHorizontal: 36,
-  },
-  placeholderEyebrow: {
-    fontSize: 10,
-    letterSpacing: 1.4,
-    textTransform: 'uppercase',
-    fontWeight: '700',
-  },
-  placeholderTitle: {
-    fontSize: 22,
-    fontWeight: '800',
-    letterSpacing: -0.4,
-    lineHeight: 26,
-    textAlign: 'center',
-  },
-  placeholderBody: {
-    fontSize: 14,
-    lineHeight: 20,
-    textAlign: 'center',
-    marginTop: 4,
   },
   topOverlay: {
     position: 'absolute',

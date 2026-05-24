@@ -7,7 +7,14 @@ import 'react-native-reanimated';
 
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { AuthProvider, useAuth } from '@/lib/auth-context';
+import {
+  getColdStartRoute,
+  setupNotificationHandler,
+  subscribeToNotificationTaps,
+} from '@/lib/notifications';
 import { PostsProvider } from '@/lib/posts-store';
+
+setupNotificationHandler();
 
 export const unstable_settings = {
   anchor: 'splash',
@@ -57,6 +64,24 @@ function RootStack() {
       router.replace('/(tabs)');
     }
   }, [session, profile, loading, segments, router]);
+
+  // Push notification routing: cold-start lookup once auth is settled and the
+  // user is on a real tab screen, plus a live subscription for taps that
+  // arrive while the app is running.
+  useEffect(() => {
+    if (loading || !session || !profile?.display_name) return;
+    let cancelled = false;
+    getColdStartRoute().then((route) => {
+      if (!cancelled && route) router.replace(route as never);
+    });
+    const unsubscribe = subscribeToNotificationTaps((route) => {
+      router.push(route as never);
+    });
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, [loading, session, profile?.display_name, router]);
 
   if (loading) {
     return (

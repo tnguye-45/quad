@@ -1,6 +1,7 @@
 import type { Session } from '@supabase/supabase-js';
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 
+import { clearPushToken, registerForPushToken } from './notifications';
 import { supabase } from './supabase';
 
 export type ProfileLink = { label: string; url: string };
@@ -105,6 +106,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       links: Array.isArray((data as Profile).links) ? (data as Profile).links : [],
     };
     setProfile(normalized);
+    // Fire-and-forget: register this device's push token under the user's
+    // account. No-ops on web, simulator, or when the user denies permission.
+    registerForPushToken(userId).catch(() => {});
   }
 
   useEffect(() => {
@@ -167,6 +171,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setProfile(null);
         return;
       }
+      // Drop the push token first so the device stops receiving notifications
+      // for the previous account; tolerate failure since the sign-out matters more.
+      if (session) await clearPushToken(session.user.id).catch(() => {});
       await supabase.auth.signOut();
     },
     async sendPasswordReset(email) {

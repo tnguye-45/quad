@@ -247,6 +247,13 @@ export type SendArgs = {
   image?: { url: string; width: number; height: number } | null;
 };
 
+/** Member read state for the active conversation. Keyed by user_id. */
+export type MemberReadState = {
+  userId: string;
+  displayName: string | null;
+  lastReadAt: number;
+};
+
 export function useThread(conversationId: string | undefined): {
   conversation: ConversationRow | null;
   partnerName: string;
@@ -256,6 +263,8 @@ export function useThread(conversationId: string | undefined): {
   loading: boolean;
   error: string | null;
   send: (args: SendArgs) => Promise<void>;
+  /** Other members' last_read_at timestamps (ms epoch). Excludes the caller. */
+  otherReads: MemberReadState[];
 } {
   const { session, isDev } = useAuth();
   const realSession = !!session && !isDev;
@@ -266,6 +275,7 @@ export function useThread(conversationId: string | undefined): {
   const [partnerAvatarUrl, setPartnerAvatarUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [otherReads, setOtherReads] = useState<MemberReadState[]>([]);
 
   useEffect(() => {
     let mounted = true;
@@ -275,6 +285,36 @@ export function useThread(conversationId: string | undefined): {
     }
     setLoading(true);
     setError(null);
+
+    const markRead = async () => {
+      await supabase
+        .from('conversation_members')
+        .update({ last_read_at: new Date().toISOString() })
+        .eq('conversation_id', conversationId)
+        .eq('user_id', session!.user.id);
+    };
+
+    const hydrateOtherReads = async () => {
+      const { data, error: err } = await supabase
+        .from('conversation_members')
+        .select(
+          'user_id, last_read_at, user:profiles!conversation_members_user_id_fkey(display_name)',
+        )
+        .eq('conversation_id', conversationId)
+        .neq('user_id', session!.user.id);
+      if (err || !data) return;
+      const rows = (data as unknown as {
+        user_id: string;
+        last_read_at: string;
+        user: { display_name: string | null } | null;
+      }[]).map((r) => ({
+        userId: r.user_id,
+        displayName: r.user?.display_name ?? null,
+        lastReadAt: new Date(r.last_read_at).getTime(),
+      }));
+      if (mounted) setOtherReads(rows);
+    };
+
     (async () => {
       try {
         const [convRes, msgsRes, partnerRes] = await Promise.all([
@@ -329,12 +369,10 @@ export function useThread(conversationId: string | undefined): {
           setPartnerInitials(partner.user.initials ?? '?');
           setPartnerAvatarUrl(partner.user.avatar_url ?? null);
         }
-        // Mark as read.
-        await supabase
-          .from('conversation_members')
-          .update({ last_read_at: new Date().toISOString() })
-          .eq('conversation_id', conversationId)
-          .eq('user_id', session!.user.id);
+        // Hydrate other members' last_read_at first (so "Read" doesn't flicker),
+        // then bump my own last_read_at to "now" so the partner sees we caught up.
+        await hydrateOtherReads();
+        await markRead();
       } catch (e: unknown) {
         if (!mounted) return;
         const msg = e instanceof Error ? e.message : 'Failed to load thread.';
@@ -345,8 +383,11 @@ export function useThread(conversationId: string | undefined): {
       }
     })();
 
+    // One channel for the whole conversation: new messages + member
+    // read-receipt updates flow through the same subscription so we open at
+    // most one realtime connection per active thread.
     const channel = supabase
-      .channel(`thread:${conversationId}`)
+      .channel(`conversation:${conversationId}`)
       .on(
         'postgres_changes',
         {
@@ -381,6 +422,40 @@ export function useThread(conversationId: string | undefined): {
                 image_height: row.image_height ?? null,
               },
             ];
+          });
+          // A new message from someone else while we're looking at the thread —
+          // bump my last_read_at so the sender sees a "Read" indicator.
+          if (row.sender_id !== session!.user.id) {
+            void markRead();
+          }
+        },
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'conversation_members',
+          filter: `conversation_id=eq.${conversationId}`,
+        },
+        (payload) => {
+          const row = payload.new as {
+            user_id: string;
+            last_read_at: string;
+          };
+          if (row.user_id === session!.user.id) return;
+          setOtherReads((cur) => {
+            const lastReadAt = new Date(row.last_read_at).getTime();
+            const idx = cur.findIndex((r) => r.userId === row.user_id);
+            if (idx === -1) {
+              return [
+                ...cur,
+                { userId: row.user_id, displayName: null, lastReadAt },
+              ];
+            }
+            const next = cur.slice();
+            next[idx] = { ...next[idx], lastReadAt };
+            return next;
           });
         },
       )
@@ -425,9 +500,19 @@ export function useThread(conversationId: string | undefined): {
       loading,
       error,
       send,
+      otherReads,
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [conversation, partnerName, partnerInitials, partnerAvatarUrl, messages, loading, error],
+    [
+      conversation,
+      partnerName,
+      partnerInitials,
+      partnerAvatarUrl,
+      messages,
+      loading,
+      error,
+      otherReads,
+    ],
   );
 }
 

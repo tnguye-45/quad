@@ -33,7 +33,7 @@ import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useAuth } from '@/lib/auth-context';
-import { useThread, type Message } from '@/lib/messaging';
+import { useThread, type MemberReadState, type Message } from '@/lib/messaging';
 import { uploadMessageImage } from '@/lib/message-images';
 
 type Msg = { from: 'me' | 'them'; text: string; time?: string };
@@ -250,6 +250,7 @@ function RealChat({
     loading,
     send,
     conversation,
+    otherReads,
   } = useThread(conversationId);
   const [draft, setDraft] = useState('');
   const [pendingImage, setPendingImage] = useState<string | null>(null);
@@ -376,6 +377,18 @@ function RealChat({
                 const showStamp =
                   !prev || m.sent_at - prev.sent_at > TIME_CLUSTER_GAP_MS;
                 const isMine = m.sender_id === userId;
+                // Show the read-receipt row only beneath the latest *sent*
+                // message — adding it beneath every bubble is noisy and not
+                // what iMessage / IG DMs do.
+                const isLatestMine =
+                  isMine &&
+                  i ===
+                    (() => {
+                      for (let j = messages.length - 1; j >= 0; j--) {
+                        if (messages[j].sender_id === userId) return j;
+                      }
+                      return -1;
+                    })();
                 return (
                   <View key={m.id ?? i}>
                     {showStamp ? (
@@ -393,6 +406,13 @@ function RealChat({
                         onTapImage={(uri) => setExpandedImage(uri)}
                       />
                     </View>
+                    {isLatestMine ? (
+                      <ReadReceiptRow
+                        message={m}
+                        otherReads={otherReads}
+                        c={c}
+                      />
+                    ) : null}
                   </View>
                 );
               })
@@ -445,6 +465,31 @@ function RealChat({
         c={c}
       />
     </GestureHandlerRootView>
+  );
+}
+
+function ReadReceiptRow({
+  message,
+  otherReads,
+  c,
+}: {
+  message: Message;
+  otherReads: MemberReadState[];
+  c: (typeof Colors)['light'];
+}) {
+  if (otherReads.length === 0) return null;
+  const readers = otherReads.filter((r) => r.lastReadAt >= message.sent_at);
+  if (readers.length === 0) return null;
+  // For a 1:1 thread (one other member), "Read" is enough. For groups, show
+  // a count so the user knows not everyone has seen it yet.
+  const label =
+    otherReads.length === 1 ? 'Read' : `Read by ${readers.length}`;
+  return (
+    <View style={styles.readRow}>
+      <ThemedText style={[styles.readText, { color: c.textMuted }]} type="mono">
+        {label}
+      </ThemedText>
+    </View>
   );
 }
 
@@ -875,6 +920,17 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     paddingHorizontal: 4,
     paddingTop: 4,
+  },
+  readRow: {
+    alignItems: 'flex-end',
+    paddingRight: 4,
+    paddingTop: 2,
+    paddingBottom: 4,
+  },
+  readText: {
+    fontSize: 10,
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
   },
   pendingPreview: {
     flexDirection: 'row',

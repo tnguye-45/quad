@@ -1,7 +1,15 @@
+import { router } from 'expo-router';
 import { useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import {
+  FlatList,
+  Pressable,
+  RefreshControl,
+  StyleSheet,
+  View,
+} from 'react-native';
 
 import { ScreenHeader } from '@/components/screen-header';
+import { SkeletonList } from '@/components/skeleton';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { IconSymbol } from '@/components/ui/icon-symbol';
@@ -14,7 +22,8 @@ const FILTERS = ['Hot', 'New', 'Today'] as const;
 export default function VoicesScreen() {
   const c = Colors[useColorScheme() ?? 'light'];
   const [filter, setFilter] = useState<(typeof FILTERS)[number]>('Hot');
-  const { voices, voteVoice, loading, hydrated } = usePosts();
+  const [refreshing, setRefreshing] = useState(false);
+  const { voices, voteVoice, loading, hydrated, error, refresh } = usePosts();
   const showLoading = !hydrated && loading && voices.length === 0;
 
   const ordered = useMemo(() => {
@@ -29,6 +38,15 @@ export default function VoicesScreen() {
     }
     return list;
   }, [voices, filter]);
+
+  async function onRefresh() {
+    setRefreshing(true);
+    try {
+      await refresh();
+    } finally {
+      setRefreshing(false);
+    }
+  }
 
   return (
     <ThemedView style={[styles.screen, { backgroundColor: c.background }]}>
@@ -53,29 +71,66 @@ export default function VoicesScreen() {
         })}
       </View>
 
-      <ScrollView
-        contentContainerStyle={styles.list}
-        showsVerticalScrollIndicator={false}>
-        {showLoading ? (
-          <ThemedText style={[styles.empty, { color: c.textSecondary }]}>
-            Loading…
-          </ThemedText>
-        ) : ordered.length === 0 ? (
-          <ThemedText style={[styles.empty, { color: c.textSecondary }]}>
-            No voices yet — be the first to speak.
-          </ThemedText>
-        ) : (
-          ordered.map((v) => (
-            <VoiceCard
-              key={v.id}
-              voice={v}
-              c={c}
-              onVote={(d) => voteVoice(v.id, d)}
-            />
-          ))
+      <FlatList
+        data={ordered}
+        keyExtractor={(v) => v.id}
+        renderItem={({ item }) => (
+          <VoiceCard
+            voice={item}
+            c={c}
+            onVote={(d) => voteVoice(item.id, d)}
+          />
         )}
-        <View style={{ height: 120 }} />
-      </ScrollView>
+        ListHeaderComponent={
+          error && !showLoading ? (
+            <Pressable
+              onPress={refresh}
+              style={({ pressed }) => [
+                styles.retryRow,
+                { borderColor: c.border, opacity: pressed ? 0.6 : 1 },
+              ]}>
+              <ThemedText style={[styles.retryText, { color: c.danger }]} type="mono">
+                Couldn&apos;t load voices. Tap to retry.
+              </ThemedText>
+            </Pressable>
+          ) : null
+        }
+        ListEmptyComponent={
+          showLoading ? (
+            <SkeletonList count={4} avatarSize={36} />
+          ) : (
+            <View style={styles.emptyBlock}>
+              <IconSymbol name="text.bubble" size={36} color={c.textMuted} />
+              <ThemedText style={[styles.emptyTitle, { color: c.text }]}>
+                No voices yet
+              </ThemedText>
+              <ThemedText style={[styles.emptyBody, { color: c.textSecondary }]}>
+                Voices are anonymous. Drop the first hot take.
+              </ThemedText>
+              <Pressable
+                onPress={() => router.push('/post-voice' as never)}
+                style={({ pressed }) => [
+                  styles.emptyCta,
+                  { backgroundColor: c.tint, opacity: pressed ? 0.8 : 1 },
+                ]}>
+                <ThemedText style={[styles.emptyCtaText, { color: c.background }]}>
+                  Post a voice
+                </ThemedText>
+              </Pressable>
+            </View>
+          )
+        }
+        contentContainerStyle={styles.list}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={c.textMuted}
+          />
+        }
+        ListFooterComponent={<View style={{ height: 120 }} />}
+      />
     </ThemedView>
   );
 }
@@ -302,9 +357,43 @@ const styles = StyleSheet.create({
     fontSize: 11,
     letterSpacing: 0.4,
   },
-  empty: {
-    fontSize: 13,
+  emptyBlock: {
+    alignItems: 'center',
+    paddingHorizontal: 32,
+    paddingTop: 80,
+    paddingBottom: 40,
+    gap: 12,
+  },
+  emptyTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    letterSpacing: -0.2,
+    marginTop: 4,
+  },
+  emptyBody: {
+    fontSize: 14,
+    lineHeight: 20,
     textAlign: 'center',
-    paddingVertical: 60,
+  },
+  emptyCta: {
+    paddingHorizontal: 22,
+    paddingVertical: 12,
+    borderRadius: 999,
+    marginTop: 8,
+  },
+  emptyCtaText: {
+    fontSize: 13,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+  },
+  retryRow: {
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  retryText: {
+    fontSize: 11,
+    letterSpacing: 0.4,
+    textTransform: 'lowercase',
   },
 });

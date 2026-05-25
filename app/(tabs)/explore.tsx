@@ -1,7 +1,16 @@
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { router } from 'expo-router';
+import { useState } from 'react';
+import {
+  FlatList,
+  Pressable,
+  RefreshControl,
+  StyleSheet,
+  View,
+} from 'react-native';
 
 import { Avatar } from '@/components/avatar';
 import { ScreenHeader } from '@/components/screen-header';
+import { SkeletonList } from '@/components/skeleton';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { IconSymbol } from '@/components/ui/icon-symbol';
@@ -20,8 +29,18 @@ const VIBE_EMOJI: Record<string, string> = {
 export default function HangoutsScreen() {
   const scheme = useColorScheme() ?? 'light';
   const c = Colors[scheme];
-  const { hangouts, rsvpHangout, loading, hydrated } = usePosts();
+  const { hangouts, rsvpHangout, loading, hydrated, error, refresh } = usePosts();
+  const [refreshing, setRefreshing] = useState(false);
   const showLoading = !hydrated && loading && hangouts.length === 0;
+
+  async function onRefresh() {
+    setRefreshing(true);
+    try {
+      await refresh();
+    } finally {
+      setRefreshing(false);
+    }
+  }
 
   return (
     <ThemedView style={[styles.screen, { backgroundColor: c.background }]}>
@@ -30,34 +49,66 @@ export default function HangoutsScreen() {
         subtitle={`${hangouts.length} happening this week`}
       />
 
-      <ScrollView
-        contentContainerStyle={styles.list}
-        showsVerticalScrollIndicator={false}>
-        {showLoading ? (
-          <ThemedText style={[styles.empty, { color: c.textSecondary }]}>
-            Loading…
-          </ThemedText>
-        ) : hangouts.length === 0 ? (
-          <View style={styles.emptyBlock}>
-            <ThemedText style={[styles.emptyHeading, { color: c.text }]}>
-              Nothing on the schedule
-            </ThemedText>
-            <ThemedText style={[styles.emptyBody, { color: c.textSecondary }]}>
-              Tap the + to start one.
-            </ThemedText>
-          </View>
-        ) : (
-          hangouts.map((h) => (
-            <HangoutCard
-              key={h.id}
-              hangout={h}
-              c={c}
-              onJoin={() => rsvpHangout(h.id)}
-            />
-          ))
+      <FlatList
+        data={hangouts}
+        keyExtractor={(h) => h.id}
+        renderItem={({ item }) => (
+          <HangoutCard
+            hangout={item}
+            c={c}
+            onJoin={() => rsvpHangout(item.id)}
+          />
         )}
-        <View style={{ height: 120 }} />
-      </ScrollView>
+        ListHeaderComponent={
+          error && !showLoading ? (
+            <Pressable
+              onPress={refresh}
+              style={({ pressed }) => [
+                styles.retryRow,
+                { borderColor: c.border, opacity: pressed ? 0.6 : 1 },
+              ]}>
+              <ThemedText style={[styles.retryText, { color: c.danger }]} type="mono">
+                Couldn&apos;t load hangouts. Tap to retry.
+              </ThemedText>
+            </Pressable>
+          ) : null
+        }
+        ListEmptyComponent={
+          showLoading ? (
+            <SkeletonList count={3} avatarSize={38} />
+          ) : (
+            <View style={styles.emptyBlock}>
+              <IconSymbol name="person.3" size={36} color={c.textMuted} />
+              <ThemedText style={[styles.emptyTitle, { color: c.text }]}>
+                Nothing on the schedule
+              </ThemedText>
+              <ThemedText style={[styles.emptyBody, { color: c.textSecondary }]}>
+                A study session, dining hall meetup, pickup basketball — pick anything.
+              </ThemedText>
+              <Pressable
+                onPress={() => router.push('/start-hangout' as never)}
+                style={({ pressed }) => [
+                  styles.emptyCta,
+                  { backgroundColor: c.tint, opacity: pressed ? 0.8 : 1 },
+                ]}>
+                <ThemedText style={[styles.emptyCtaText, { color: c.background }]}>
+                  Start a hangout
+                </ThemedText>
+              </Pressable>
+            </View>
+          )
+        }
+        contentContainerStyle={styles.list}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={c.textMuted}
+          />
+        }
+        ListFooterComponent={<View style={{ height: 120 }} />}
+      />
     </ThemedView>
   );
 }
@@ -205,22 +256,42 @@ const styles = StyleSheet.create({
     letterSpacing: 0.2,
   },
   emptyBlock: {
+    alignItems: 'center',
     paddingHorizontal: 32,
     paddingTop: 80,
-    alignItems: 'center',
-    gap: 8,
+    paddingBottom: 40,
+    gap: 12,
   },
-  emptyHeading: {
+  emptyTitle: {
     fontSize: 18,
     fontWeight: '700',
+    letterSpacing: -0.2,
+    marginTop: 4,
   },
   emptyBody: {
     fontSize: 14,
+    lineHeight: 20,
     textAlign: 'center',
   },
-  empty: {
+  emptyCta: {
+    paddingHorizontal: 22,
+    paddingVertical: 12,
+    borderRadius: 999,
+    marginTop: 8,
+  },
+  emptyCtaText: {
     fontSize: 13,
-    textAlign: 'center',
-    paddingVertical: 60,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+  },
+  retryRow: {
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  retryText: {
+    fontSize: 11,
+    letterSpacing: 0.4,
+    textTransform: 'lowercase',
   },
 });

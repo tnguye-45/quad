@@ -8,6 +8,7 @@ import { ThemedText } from '@/components/themed-text';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { useUnreadCounts } from '@/lib/messaging';
 
 type TabKey = 'index' | 'voices' | 'explore' | 'messages' | 'map';
 
@@ -25,6 +26,7 @@ export function AppTabBar({ state, navigation }: BottomTabBarProps) {
   const scheme = useColorScheme() ?? 'light';
   const c = Colors[scheme];
   const [sheetOpen, setSheetOpen] = useState(false);
+  const { total: unreadTotal } = useUnreadCounts();
 
   const currentRoute = state.routes[state.index]?.name as TabKey | undefined;
 
@@ -93,6 +95,12 @@ export function AppTabBar({ state, navigation }: BottomTabBarProps) {
             iconOff={ICON[key].off}
             color={c.tabIconSelected}
             inactiveColor={c.tabIconDefault}
+            // Gold dot on the Messages tab when anything is unread anywhere.
+            // No number — the house style is minimalist; the count lives on
+            // the Messages list itself.
+            badgeColor={
+              key === 'messages' && unreadTotal > 0 ? c.accent : undefined
+            }
           />
         ))}
       </View>
@@ -168,6 +176,7 @@ function TabButton({
   iconOff,
   color,
   inactiveColor,
+  badgeColor,
 }: {
   active: boolean;
   onPress: () => void;
@@ -175,17 +184,23 @@ function TabButton({
   iconOff: Parameters<typeof IconSymbol>[0]['name'];
   color: string;
   inactiveColor: string;
+  badgeColor?: string;
 }) {
   return (
     <Pressable
       onPress={onPress}
       hitSlop={6}
       style={({ pressed }) => [styles.tab, { opacity: pressed ? 0.5 : 1 }]}>
-      <IconSymbol
-        name={active ? iconOn : iconOff}
-        size={24}
-        color={active ? color : inactiveColor}
-      />
+      <View style={{ position: 'relative' }}>
+        <IconSymbol
+          name={active ? iconOn : iconOff}
+          size={24}
+          color={active ? color : inactiveColor}
+        />
+        {badgeColor ? (
+          <View style={[styles.tabBadge, { backgroundColor: badgeColor }]} />
+        ) : null}
+      </View>
     </Pressable>
   );
 }
@@ -242,6 +257,14 @@ const styles = StyleSheet.create({
   },
   centerTab: {
     flex: 1,
+  },
+  tabBadge: {
+    position: 'absolute',
+    top: -2,
+    right: -3,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
   },
   createBtn: {
     width: 40,

@@ -670,3 +670,75 @@ export async function leaveHangout(hangoutId: string): Promise<boolean> {
   }
   return true;
 }
+
+// ─────────────────────── Unread counts (deliverable 4) ───────────────────────
+
+/**
+ * Per-conversation unread message counts for the current user, plus the
+ * total across all conversations. Drives both the gold dot on Messages-tab
+ * rows and the global Messages tab-icon badge.
+ *
+ * One global realtime subscription on `messages` is used to invalidate the
+ * cache — we do NOT open a subscription per conversation in the DM list.
+ * The RLS policy on messages already restricts SELECTs to conversations
+ * the user is a member of, so the realtime stream naturally filters out
+ * unrelated rows.
+ */
+export function useUnreadCounts(): {
+  byConversation: Record<string, number>;
+  total: number;
+  refresh: () => Promise<void>;
+} {
+  const { session, isDev } = useAuth();
+  const realSession = !!session && !isDev;
+  const [byConversation, setByConversation] = useState<Record<string, number>>({});
+
+  const fetchCounts = async () => {
+    if (!realSession) {
+      setByConversation({});
+      return;
+    }
+    const { data, error } = await supabase.rpc('unread_counts_for_user', {
+      p_user_id: session!.user.id,
+    });
+    if (error) {
+      console.warn('[messaging] unread_counts_for_user failed:', error.message);
+      return;
+    }
+    const next: Record<string, number> = {};
+    for (const row of (data ?? []) as { conversation_id: string; unread: number }[]) {
+      next[row.conversation_id] = row.unread;
+    }
+    setByConversation(next);
+  };
+
+  useEffect(() => {
+    fetchCounts();
+    if (!realSession) return;
+    // ONE global subscription — RLS filters to conversations we're in.
+    const channel = supabase
+      .channel('unread-counts')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'messages' },
+        () => fetchCounts(),
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'conversation_members' },
+        () => fetchCounts(),
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [realSession, session?.user.id]);
+
+  const total = useMemo(
+    () => Object.values(byConversation).reduce((s, n) => s + n, 0),
+    [byConversation],
+  );
+
+  return { byConversation, total, refresh: fetchCounts };
+}

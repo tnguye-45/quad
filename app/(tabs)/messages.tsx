@@ -8,7 +8,11 @@ import { ThemedView } from '@/components/themed-view';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useAuth } from '@/lib/auth-context';
-import { useConversations, type ConversationSummary } from '@/lib/messaging';
+import {
+  useConversations,
+  useUnreadCounts,
+  type ConversationSummary,
+} from '@/lib/messaging';
 
 type MockConvo = {
   id: string;
@@ -47,6 +51,7 @@ export default function MessagesScreen() {
   const { session, isDev } = useAuth();
   const realSession = !!session && !isDev;
   const { conversations, loading, error } = useConversations();
+  const { byConversation: unreadByConversation } = useUnreadCounts();
 
   const useReal = realSession;
   const items: (MockConvo | (ConversationSummary & { __real: true }))[] = useReal
@@ -131,7 +136,9 @@ export default function MessagesScreen() {
             const context = isReal ? co.contextLabel : co.context;
             const preview = isReal ? co.preview : co.preview;
             const time = isReal ? timeAgo(co.preview_at) : co.time;
-            const unread = isReal ? co.unread : !!co.unread;
+            const unread = isReal
+              ? co.unread || (unreadByConversation[co.id] ?? 0) > 0
+              : !!co.unread;
             return (
               <Pressable
                 key={co.id}

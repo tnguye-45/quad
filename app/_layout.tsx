@@ -42,8 +42,15 @@ function RootStack() {
     const first = segments[0] as string | undefined;
     const inAuthGroup = first === '(auth)';
     const inProfileSetup = first === 'profile-setup';
-    const inProtectedApp = first === '(tabs)' || first === 'chat' || first === 'modal';
+    const inProtectedApp =
+      first === '(tabs)' ||
+      first === 'chat' ||
+      first === 'modal' ||
+      first === 'settings' ||
+      first === 'report';
+    const inLegal = first === 'legal'; // legal screens are accessible signed-out too
     const inSplashOrWelcome = first === undefined || first === 'splash' || first === 'welcome';
+    void inLegal;
 
     if (!session) {
       // Not signed in — kick out of protected routes.
@@ -117,6 +124,15 @@ function RootStack() {
           name="gig/[id]"
           options={{ presentation: 'modal', title: 'Gig' }}
         />
+        <Stack.Screen name="settings/account" options={{ headerShown: false }} />
+        <Stack.Screen name="settings/blocked" options={{ headerShown: false }} />
+        <Stack.Screen name="settings/notifications" options={{ headerShown: false }} />
+        <Stack.Screen
+          name="report"
+          options={{ presentation: 'modal', title: 'Report' }}
+        />
+        <Stack.Screen name="legal/privacy" options={{ headerShown: false }} />
+        <Stack.Screen name="legal/tos" options={{ headerShown: false }} />
       </Stack>
       <StatusBar style="auto" />
     </ThemeProvider>

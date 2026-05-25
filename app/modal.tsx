@@ -202,6 +202,13 @@ export default function MeModal() {
             </ThemedText>
           </Pressable>
           <Pressable
+            onPress={() => router.push('/settings/account')}
+            style={({ pressed }) => [styles.settingsBtn, { opacity: pressed ? 0.5 : 1 }]}>
+            <ThemedText style={[styles.settingsText, { color: c.textSecondary }]} type="mono">
+              account settings
+            </ThemedText>
+          </Pressable>
+          <Pressable
             onPress={handleSignOut}
             style={({ pressed }) => [styles.signOutBtn, { opacity: pressed ? 0.5 : 1 }]}>
             <ThemedText style={[styles.signOutText, { color: c.danger }]} type="mono">
@@ -419,5 +426,12 @@ const styles = StyleSheet.create({
     letterSpacing: 1.2,
     textTransform: 'uppercase',
     fontWeight: '700',
+  },
+  settingsBtn: { paddingVertical: 6 },
+  settingsText: {
+    fontSize: 11,
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
+    fontWeight: '600',
   },
 });

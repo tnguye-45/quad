@@ -121,6 +121,23 @@ export default function SignUpScreen() {
             </ThemedText>
           </Link>
         </View>
+        <View style={styles.legal}>
+          <ThemedText style={[styles.legalText, { color: c.textMuted }]} type="mono">
+            By signing up you agree to our{' '}
+            <Link href="/legal/tos">
+              <ThemedText style={[styles.legalLink, { color: c.text }]} type="mono">
+                Terms
+              </ThemedText>
+            </Link>
+            {' '}and{' '}
+            <Link href="/legal/privacy">
+              <ThemedText style={[styles.legalLink, { color: c.text }]} type="mono">
+                Privacy Policy
+              </ThemedText>
+            </Link>
+            .
+          </ThemedText>
+        </View>
       </ThemedView>
     </KeyboardAvoidingView>
   );
@@ -211,4 +228,21 @@ const styles = StyleSheet.create({
   },
   footerText: { fontSize: 13 },
   footerLink: { fontSize: 13, fontWeight: '700' },
+  legal: {
+    paddingHorizontal: 28,
+    paddingBottom: 24,
+    alignItems: 'center',
+  },
+  legalText: {
+    fontSize: 10,
+    letterSpacing: 0.4,
+    lineHeight: 16,
+    textAlign: 'center',
+  },
+  legalLink: {
+    fontSize: 10,
+    letterSpacing: 0.4,
+    fontWeight: '700',
+    textDecorationLine: 'underline',
+  },
 });

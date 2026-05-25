@@ -161,13 +161,21 @@ type Store = {
   hydrated: boolean;
   loading: boolean;
   error: string | null;
+  /** True when there's another page of data on the server. Set per-kind. */
+  hasMore: { gigs: boolean; hangouts: boolean; voices: boolean };
   refresh: () => Promise<void>;
+  /** Cursor-based pagination on posted_at / created_at. Idempotent: a no-op
+   *  while a load is already in flight for that kind. */
+  loadMore: (kind: 'gigs' | 'hangouts' | 'voices') => Promise<void>;
   addGig: (input: AddGigInput) => Promise<void>;
   addHangout: (input: AddHangoutInput) => Promise<void>;
   addVoice: (input: AddVoiceInput) => Promise<void>;
   rsvpHangout: (id: string) => Promise<void>;
   voteVoice: (id: string, delta: 1 | -1 | 0) => Promise<void>;
 };
+
+/** How many rows to fetch per page on initial load + each loadMore call. */
+const PAGE_SIZE = 20;
 
 const PostsContext = createContext<Store | null>(null);
 
@@ -316,8 +324,20 @@ export function PostsProvider({ children }: { children: ReactNode }) {
   const [hydrated, setHydrated] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [hasMore, setHasMore] = useState<{ gigs: boolean; hangouts: boolean; voices: boolean }>({
+    gigs: true,
+    hangouts: true,
+    voices: true,
+  });
   // Track per-user vote choices so we can update voice_votes correctly.
   const myVoteRef = useRef<Map<string, 1 | -1>>(new Map());
+  // Guards so a fast-flick on a FlatList doesn't fire overlapping loadMore
+  // round-trips — onEndReached fires multiple times per scroll on iOS.
+  const loadingMoreRef = useRef<{ gigs: boolean; hangouts: boolean; voices: boolean }>({
+    gigs: false,
+    hangouts: false,
+    voices: false,
+  });
 
   const fetchAll = useCallback(async () => {
     if (!realSession) {
@@ -328,23 +348,44 @@ export function PostsProvider({ children }: { children: ReactNode }) {
       setHydrated(true);
       setLoading(false);
       setError(null);
+      setHasMore({ gigs: false, hangouts: false, voices: false });
       return;
     }
     setLoading(true);
     setError(null);
     try {
       const [gigsRes, hangoutsRes, voicesRes, votesRes] = await Promise.all([
-        supabase.from('gigs').select(GIG_SELECT).order('posted_at', { ascending: false }),
-        supabase.from('hangouts').select(HANGOUT_SELECT).order('created_at', { ascending: false }),
-        supabase.from('voices').select(VOICE_SELECT).order('posted_at', { ascending: false }),
+        supabase
+          .from('gigs')
+          .select(GIG_SELECT)
+          .order('posted_at', { ascending: false })
+          .limit(PAGE_SIZE),
+        supabase
+          .from('hangouts')
+          .select(HANGOUT_SELECT)
+          .order('created_at', { ascending: false })
+          .limit(PAGE_SIZE),
+        supabase
+          .from('voices')
+          .select(VOICE_SELECT)
+          .order('posted_at', { ascending: false })
+          .limit(PAGE_SIZE),
         supabase.from('voice_votes').select('voice_id, value').eq('user_id', session!.user.id),
       ]);
       if (gigsRes.error) throw gigsRes.error;
       if (hangoutsRes.error) throw hangoutsRes.error;
       if (voicesRes.error) throw voicesRes.error;
-      setGigs(((gigsRes.data ?? []) as DbGigRow[]).map(gigFromDb));
-      setHangouts(((hangoutsRes.data ?? []) as DbHangoutRow[]).map(hangoutFromDb));
-      setVoices(((voicesRes.data ?? []) as DbVoiceRow[]).map(voiceFromDb));
+      const gigsData = (gigsRes.data ?? []) as DbGigRow[];
+      const hangoutsData = (hangoutsRes.data ?? []) as DbHangoutRow[];
+      const voicesData = (voicesRes.data ?? []) as DbVoiceRow[];
+      setGigs(gigsData.map(gigFromDb));
+      setHangouts(hangoutsData.map(hangoutFromDb));
+      setVoices(voicesData.map(voiceFromDb));
+      setHasMore({
+        gigs: gigsData.length === PAGE_SIZE,
+        hangouts: hangoutsData.length === PAGE_SIZE,
+        voices: voicesData.length === PAGE_SIZE,
+      });
       const voteMap = new Map<string, 1 | -1>();
       for (const v of votesRes.data ?? []) {
         voteMap.set(v.voice_id, v.value === 1 ? 1 : -1);
@@ -359,6 +400,81 @@ export function PostsProvider({ children }: { children: ReactNode }) {
       setLoading(false);
     }
   }, [realSession, session]);
+
+  // Cursor-based pagination. We sort by posted_at/created_at desc, so the
+  // cursor is the timestamp of the OLDEST row already loaded for that kind.
+  // The next page asks for rows strictly older than that timestamp.
+  const loadMore = useCallback(
+    async (kind: 'gigs' | 'hangouts' | 'voices') => {
+      if (!realSession) return;
+      if (loadingMoreRef.current[kind]) return;
+      if (!hasMore[kind]) return;
+      loadingMoreRef.current[kind] = true;
+      try {
+        if (kind === 'gigs') {
+          const oldest = gigs[gigs.length - 1];
+          if (!oldest) return;
+          const cursor = new Date(oldest.postedAt).toISOString();
+          const { data, error: err } = await supabase
+            .from('gigs')
+            .select(GIG_SELECT)
+            .lt('posted_at', cursor)
+            .order('posted_at', { ascending: false })
+            .limit(PAGE_SIZE);
+          if (err) throw err;
+          const rows = (data ?? []) as DbGigRow[];
+          const fresh = rows.map(gigFromDb);
+          setGigs((cur) => {
+            const seen = new Set(cur.map((g) => g.id));
+            return [...cur, ...fresh.filter((g) => !seen.has(g.id))];
+          });
+          setHasMore((h) => ({ ...h, gigs: rows.length === PAGE_SIZE }));
+        } else if (kind === 'hangouts') {
+          const oldest = hangouts[hangouts.length - 1];
+          if (!oldest) return;
+          const cursor = new Date(oldest.postedAt).toISOString();
+          const { data, error: err } = await supabase
+            .from('hangouts')
+            .select(HANGOUT_SELECT)
+            .lt('created_at', cursor)
+            .order('created_at', { ascending: false })
+            .limit(PAGE_SIZE);
+          if (err) throw err;
+          const rows = (data ?? []) as DbHangoutRow[];
+          const fresh = rows.map(hangoutFromDb);
+          setHangouts((cur) => {
+            const seen = new Set(cur.map((h) => h.id));
+            return [...cur, ...fresh.filter((h) => !seen.has(h.id))];
+          });
+          setHasMore((h) => ({ ...h, hangouts: rows.length === PAGE_SIZE }));
+        } else {
+          const oldest = voices[voices.length - 1];
+          if (!oldest) return;
+          const cursor = new Date(oldest.postedAt).toISOString();
+          const { data, error: err } = await supabase
+            .from('voices')
+            .select(VOICE_SELECT)
+            .lt('posted_at', cursor)
+            .order('posted_at', { ascending: false })
+            .limit(PAGE_SIZE);
+          if (err) throw err;
+          const rows = (data ?? []) as DbVoiceRow[];
+          const fresh = rows.map(voiceFromDb);
+          setVoices((cur) => {
+            const seen = new Set(cur.map((v) => v.id));
+            return [...cur, ...fresh.filter((v) => !seen.has(v.id))];
+          });
+          setHasMore((h) => ({ ...h, voices: rows.length === PAGE_SIZE }));
+        }
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : 'Failed to load more.';
+        console.warn(`[posts-store] loadMore(${kind}) failed:`, msg);
+      } finally {
+        loadingMoreRef.current[kind] = false;
+      }
+    },
+    [realSession, gigs, hangouts, voices, hasMore],
+  );
 
   useEffect(() => {
     fetchAll();
@@ -632,7 +748,9 @@ export function PostsProvider({ children }: { children: ReactNode }) {
       hydrated,
       loading,
       error,
+      hasMore,
       refresh: fetchAll,
+      loadMore,
       addGig: addGigImpl,
       addHangout: addHangoutImpl,
       addVoice: addVoiceImpl,
@@ -642,7 +760,7 @@ export function PostsProvider({ children }: { children: ReactNode }) {
     // We intentionally don't depend on the mutation functions; they read state via closures
     // but only state-bound effects (gigs, hangouts, voices) need to drive re-renders.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [gigs, hangouts, voices, hydrated, loading, error, fetchAll],
+    [gigs, hangouts, voices, hydrated, loading, error, hasMore, fetchAll, loadMore],
   );
 
   return <PostsContext.Provider value={value}>{children}</PostsContext.Provider>;

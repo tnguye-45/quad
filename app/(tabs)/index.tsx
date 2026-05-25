@@ -37,7 +37,7 @@ export default function GigsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const scheme = useColorScheme() ?? 'light';
   const c = Colors[scheme];
-  const { gigs, loading, hydrated, error, refresh } = usePosts();
+  const { gigs, loading, hydrated, error, refresh, loadMore, hasMore } = usePosts();
 
   const visible = selected === 'All' ? gigs : gigs.filter((g) => g.category === selected);
   const showLoading = !hydrated && loading && gigs.length === 0;
@@ -148,6 +148,12 @@ export default function GigsScreen() {
             tintColor={c.textMuted}
           />
         }
+        onEndReachedThreshold={0.4}
+        onEndReached={() => {
+          if (selected === 'All' && hasMore.gigs) {
+            void loadMore('gigs');
+          }
+        }}
         ListFooterComponent={<View style={{ height: 120 }} />}
       />
     </ThemedView>

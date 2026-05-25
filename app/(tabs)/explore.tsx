@@ -29,7 +29,7 @@ const VIBE_EMOJI: Record<string, string> = {
 export default function HangoutsScreen() {
   const scheme = useColorScheme() ?? 'light';
   const c = Colors[scheme];
-  const { hangouts, rsvpHangout, loading, hydrated, error, refresh } = usePosts();
+  const { hangouts, rsvpHangout, loading, hydrated, error, refresh, loadMore, hasMore } = usePosts();
   const [refreshing, setRefreshing] = useState(false);
   const showLoading = !hydrated && loading && hangouts.length === 0;
 
@@ -107,6 +107,10 @@ export default function HangoutsScreen() {
             tintColor={c.textMuted}
           />
         }
+        onEndReachedThreshold={0.4}
+        onEndReached={() => {
+          if (hasMore.hangouts) void loadMore('hangouts');
+        }}
         ListFooterComponent={<View style={{ height: 120 }} />}
       />
     </ThemedView>

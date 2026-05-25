@@ -23,7 +23,7 @@ export default function VoicesScreen() {
   const c = Colors[useColorScheme() ?? 'light'];
   const [filter, setFilter] = useState<(typeof FILTERS)[number]>('Hot');
   const [refreshing, setRefreshing] = useState(false);
-  const { voices, voteVoice, loading, hydrated, error, refresh } = usePosts();
+  const { voices, voteVoice, loading, hydrated, error, refresh, loadMore, hasMore } = usePosts();
   const showLoading = !hydrated && loading && voices.length === 0;
 
   const ordered = useMemo(() => {
@@ -129,6 +129,14 @@ export default function VoicesScreen() {
             tintColor={c.textMuted}
           />
         }
+        onEndReachedThreshold={0.4}
+        onEndReached={() => {
+          // Filter "Today" trims server pages, so pagination only kicks in
+          // on Hot / New where we still want to chase the cursor.
+          if (filter !== 'Today' && hasMore.voices) {
+            void loadMore('voices');
+          }
+        }}
         ListFooterComponent={<View style={{ height: 120 }} />}
       />
     </ThemedView>

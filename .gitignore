@@ -42,6 +42,10 @@ yarn-error.*
 .claude/
 .verify/
 
+# brand / UX reference exports (kept locally, not tracked)
+BRAND_AND_UX.html
+BRAND_AND_UX.pdf
+
 app-example
 
 # generated native folders

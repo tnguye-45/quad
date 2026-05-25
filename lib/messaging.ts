@@ -22,6 +22,9 @@ export type Message = {
   sender_name: string | null;
   sender_initials: string | null;
   sender_avatar_url: string | null;
+  image_url: string | null;
+  image_width: number | null;
+  image_height: number | null;
 };
 
 type ProfileEmbed = {
@@ -61,8 +64,11 @@ type MessageRow = {
   id: string;
   conversation_id: string;
   sender_id: string;
-  body: string;
+  body: string | null;
   sent_at: string;
+  image_url: string | null;
+  image_width: number | null;
+  image_height: number | null;
   sender: ProfileEmbed;
 };
 
@@ -137,7 +143,7 @@ export function useConversations(): {
         // — the row counts here are small (one chat thread per gig).
         supabase
           .from('messages')
-          .select('id, conversation_id, sender_id, body, sent_at')
+          .select('id, conversation_id, sender_id, body, sent_at, image_url')
           .in('conversation_id', convIds)
           .order('sent_at', { ascending: false }),
         // Other members of each conversation (everyone except me, with name).
@@ -152,13 +158,17 @@ export function useConversations(): {
       if (latestRes.error) throw latestRes.error;
       if (partnerRes.error) throw partnerRes.error;
 
-      const lastByConv = new Map<string, { body: string; sent_at: string; sender_id: string }>();
+      const lastByConv = new Map<
+        string,
+        { body: string | null; sent_at: string; sender_id: string; image_url: string | null }
+      >();
       for (const m of latestRes.data ?? []) {
         if (!lastByConv.has(m.conversation_id)) {
           lastByConv.set(m.conversation_id, {
             body: m.body,
             sent_at: m.sent_at,
             sender_id: m.sender_id,
+            image_url: (m as { image_url?: string | null }).image_url ?? null,
           });
         }
       }
@@ -190,7 +200,13 @@ export function useConversations(): {
           partnerName,
           partnerInitials,
           partnerAvatarUrl,
-          preview: last?.body ?? 'No messages yet — say hi.',
+          preview: last
+            ? (last.body && last.body.length > 0
+                ? last.body
+                : last.image_url
+                  ? '📷 Photo'
+                  : '')
+            : 'No messages yet — say hi.',
           preview_at: lastMsgAt,
           unread: !!last && last.sender_id !== me && lastMsgAt > lastReadAt,
         };
@@ -226,6 +242,11 @@ export function useConversations(): {
   return { conversations: rows, loading, error, refresh: fetchAll };
 }
 
+export type SendArgs = {
+  body?: string;
+  image?: { url: string; width: number; height: number } | null;
+};
+
 export function useThread(conversationId: string | undefined): {
   conversation: ConversationRow | null;
   partnerName: string;
@@ -234,7 +255,7 @@ export function useThread(conversationId: string | undefined): {
   messages: Message[];
   loading: boolean;
   error: string | null;
-  send: (body: string) => Promise<void>;
+  send: (args: SendArgs) => Promise<void>;
 } {
   const { session, isDev } = useAuth();
   const realSession = !!session && !isDev;
@@ -269,7 +290,7 @@ export function useThread(conversationId: string | undefined): {
           supabase
             .from('messages')
             .select(
-              'id, conversation_id, sender_id, body, sent_at, sender:profiles!messages_sender_id_fkey(display_name, initials, avatar_url)',
+              'id, conversation_id, sender_id, body, sent_at, image_url, image_width, image_height, sender:profiles!messages_sender_id_fkey(display_name, initials, avatar_url)',
             )
             .eq('conversation_id', conversationId)
             .order('sent_at', { ascending: true }),
@@ -289,12 +310,15 @@ export function useThread(conversationId: string | undefined): {
         setMessages(
           ((msgsRes.data ?? []) as unknown as MessageRow[]).map((m) => ({
             id: m.id,
-            body: m.body,
+            body: m.body ?? '',
             sent_at: new Date(m.sent_at).getTime(),
             sender_id: m.sender_id,
             sender_name: m.sender?.display_name ?? null,
             sender_initials: m.sender?.initials ?? null,
             sender_avatar_url: m.sender?.avatar_url ?? null,
+            image_url: m.image_url ?? null,
+            image_width: m.image_width ?? null,
+            image_height: m.image_height ?? null,
           })),
         );
         const partner = (partnerRes.data ?? [])[0] as unknown as
@@ -346,12 +370,15 @@ export function useThread(conversationId: string | undefined): {
               ...cur,
               {
                 id: row.id,
-                body: row.body,
+                body: row.body ?? '',
                 sent_at: new Date(row.sent_at).getTime(),
                 sender_id: row.sender_id,
                 sender_name: senderRes?.display_name ?? null,
                 sender_initials: senderRes?.initials ?? null,
                 sender_avatar_url: senderRes?.avatar_url ?? null,
+                image_url: row.image_url ?? null,
+                image_width: row.image_width ?? null,
+                image_height: row.image_height ?? null,
               },
             ];
           });
@@ -366,15 +393,22 @@ export function useThread(conversationId: string | undefined): {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [realSession, conversationId, session?.user.id]);
 
-  const send = async (body: string) => {
+  const send = async (args: SendArgs) => {
     if (!realSession || !conversationId) return;
-    const trimmed = body.trim();
-    if (!trimmed) return;
-    const { error: sendErr } = await supabase.from('messages').insert({
+    const trimmed = (args.body ?? '').trim();
+    const hasImage = !!args.image?.url;
+    if (!trimmed && !hasImage) return;
+    const payload: Record<string, unknown> = {
       conversation_id: conversationId,
       sender_id: session!.user.id,
-      body: trimmed,
-    });
+      body: trimmed.length > 0 ? trimmed : null,
+    };
+    if (hasImage && args.image) {
+      payload.image_url = args.image.url;
+      payload.image_width = args.image.width;
+      payload.image_height = args.image.height;
+    }
+    const { error: sendErr } = await supabase.from('messages').insert(payload);
     if (sendErr) {
       console.warn('[messaging] send failed:', sendErr.message);
       setError(sendErr.message);

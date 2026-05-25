@@ -38,7 +38,8 @@ type MessageRow = {
   id: string;
   conversation_id: string;
   sender_id: string;
-  body: string;
+  body: string | null;
+  image_url?: string | null;
   sent_at?: string;
 };
 
@@ -135,9 +136,16 @@ async function buildNotificationFields(message: MessageRow): Promise<{
   } else if (conv?.hangout?.title) {
     title = `${senderName} · ${conv.hangout.title}`;
   }
-  // iOS truncates around ~178 chars; keep body short.
-  const body =
-    message.body.length > 200 ? `${message.body.slice(0, 197)}…` : message.body;
+  // Image-only messages get a glyphed placeholder body so the notification
+  // doesn't render as an empty string. Text messages get a clipped body.
+  const rawBody = message.body ?? '';
+  let body: string;
+  if (rawBody.length === 0 && message.image_url) {
+    body = '📷 Photo';
+  } else {
+    // iOS truncates around ~178 chars; keep body short.
+    body = rawBody.length > 200 ? `${rawBody.slice(0, 197)}…` : rawBody;
+  }
   return { title, body };
 }
 

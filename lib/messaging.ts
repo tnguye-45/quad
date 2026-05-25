@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { useAuth } from './auth-context';
 import { supabase } from './supabase';
@@ -22,6 +22,9 @@ export type Message = {
   sender_name: string | null;
   sender_initials: string | null;
   sender_avatar_url: string | null;
+  image_url: string | null;
+  image_width: number | null;
+  image_height: number | null;
 };
 
 type ProfileEmbed = {
@@ -61,8 +64,11 @@ type MessageRow = {
   id: string;
   conversation_id: string;
   sender_id: string;
-  body: string;
+  body: string | null;
   sent_at: string;
+  image_url: string | null;
+  image_width: number | null;
+  image_height: number | null;
   sender: ProfileEmbed;
 };
 
@@ -137,7 +143,7 @@ export function useConversations(): {
         // — the row counts here are small (one chat thread per gig).
         supabase
           .from('messages')
-          .select('id, conversation_id, sender_id, body, sent_at')
+          .select('id, conversation_id, sender_id, body, sent_at, image_url')
           .in('conversation_id', convIds)
           .order('sent_at', { ascending: false }),
         // Other members of each conversation (everyone except me, with name).
@@ -152,13 +158,17 @@ export function useConversations(): {
       if (latestRes.error) throw latestRes.error;
       if (partnerRes.error) throw partnerRes.error;
 
-      const lastByConv = new Map<string, { body: string; sent_at: string; sender_id: string }>();
+      const lastByConv = new Map<
+        string,
+        { body: string | null; sent_at: string; sender_id: string; image_url: string | null }
+      >();
       for (const m of latestRes.data ?? []) {
         if (!lastByConv.has(m.conversation_id)) {
           lastByConv.set(m.conversation_id, {
             body: m.body,
             sent_at: m.sent_at,
             sender_id: m.sender_id,
+            image_url: (m as { image_url?: string | null }).image_url ?? null,
           });
         }
       }
@@ -190,7 +200,13 @@ export function useConversations(): {
           partnerName,
           partnerInitials,
           partnerAvatarUrl,
-          preview: last?.body ?? 'No messages yet — say hi.',
+          preview: last
+            ? (last.body && last.body.length > 0
+                ? last.body
+                : last.image_url
+                  ? '📷 Photo'
+                  : '')
+            : 'No messages yet — say hi.',
           preview_at: lastMsgAt,
           unread: !!last && last.sender_id !== me && lastMsgAt > lastReadAt,
         };
@@ -226,6 +242,24 @@ export function useConversations(): {
   return { conversations: rows, loading, error, refresh: fetchAll };
 }
 
+export type SendArgs = {
+  body?: string;
+  image?: { url: string; width: number; height: number } | null;
+};
+
+/** Member read state for the active conversation. Keyed by user_id. */
+export type MemberReadState = {
+  userId: string;
+  displayName: string | null;
+  lastReadAt: number;
+};
+
+/** Typing presence for the active conversation. Keyed by user_id. */
+export type TypingState = {
+  userId: string;
+  displayName: string | null;
+};
+
 export function useThread(conversationId: string | undefined): {
   conversation: ConversationRow | null;
   partnerName: string;
@@ -234,7 +268,13 @@ export function useThread(conversationId: string | undefined): {
   messages: Message[];
   loading: boolean;
   error: string | null;
-  send: (body: string) => Promise<void>;
+  send: (args: SendArgs) => Promise<void>;
+  /** Other members' last_read_at timestamps (ms epoch). Excludes the caller. */
+  otherReads: MemberReadState[];
+  /** Other members typing right now. Excludes the caller. */
+  typing: TypingState[];
+  /** Mark a typing intent. Debounced to send "false" 1.5s after last call. */
+  setTyping: (isTyping: boolean) => void;
 } {
   const { session, isDev } = useAuth();
   const realSession = !!session && !isDev;
@@ -245,6 +285,15 @@ export function useThread(conversationId: string | undefined): {
   const [partnerAvatarUrl, setPartnerAvatarUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [otherReads, setOtherReads] = useState<MemberReadState[]>([]);
+  const [typing, setTypingList] = useState<TypingState[]>([]);
+
+  // Stable refs the typing debouncer reads — we can't capture changing state
+  // in the debounce timer without rescheduling on every keypress.
+  const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+  const myDisplayNameRef = useRef<string | null>(null);
+  const lastTypingSentRef = useRef<boolean>(false);
+  const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -254,6 +303,36 @@ export function useThread(conversationId: string | undefined): {
     }
     setLoading(true);
     setError(null);
+
+    const markRead = async () => {
+      await supabase
+        .from('conversation_members')
+        .update({ last_read_at: new Date().toISOString() })
+        .eq('conversation_id', conversationId)
+        .eq('user_id', session!.user.id);
+    };
+
+    const hydrateOtherReads = async () => {
+      const { data, error: err } = await supabase
+        .from('conversation_members')
+        .select(
+          'user_id, last_read_at, user:profiles!conversation_members_user_id_fkey(display_name)',
+        )
+        .eq('conversation_id', conversationId)
+        .neq('user_id', session!.user.id);
+      if (err || !data) return;
+      const rows = (data as unknown as {
+        user_id: string;
+        last_read_at: string;
+        user: { display_name: string | null } | null;
+      }[]).map((r) => ({
+        userId: r.user_id,
+        displayName: r.user?.display_name ?? null,
+        lastReadAt: new Date(r.last_read_at).getTime(),
+      }));
+      if (mounted) setOtherReads(rows);
+    };
+
     (async () => {
       try {
         const [convRes, msgsRes, partnerRes] = await Promise.all([
@@ -269,7 +348,7 @@ export function useThread(conversationId: string | undefined): {
           supabase
             .from('messages')
             .select(
-              'id, conversation_id, sender_id, body, sent_at, sender:profiles!messages_sender_id_fkey(display_name, initials, avatar_url)',
+              'id, conversation_id, sender_id, body, sent_at, image_url, image_width, image_height, sender:profiles!messages_sender_id_fkey(display_name, initials, avatar_url)',
             )
             .eq('conversation_id', conversationId)
             .order('sent_at', { ascending: true }),
@@ -289,12 +368,15 @@ export function useThread(conversationId: string | undefined): {
         setMessages(
           ((msgsRes.data ?? []) as unknown as MessageRow[]).map((m) => ({
             id: m.id,
-            body: m.body,
+            body: m.body ?? '',
             sent_at: new Date(m.sent_at).getTime(),
             sender_id: m.sender_id,
             sender_name: m.sender?.display_name ?? null,
             sender_initials: m.sender?.initials ?? null,
             sender_avatar_url: m.sender?.avatar_url ?? null,
+            image_url: m.image_url ?? null,
+            image_width: m.image_width ?? null,
+            image_height: m.image_height ?? null,
           })),
         );
         const partner = (partnerRes.data ?? [])[0] as unknown as
@@ -305,12 +387,18 @@ export function useThread(conversationId: string | undefined): {
           setPartnerInitials(partner.user.initials ?? '?');
           setPartnerAvatarUrl(partner.user.avatar_url ?? null);
         }
-        // Mark as read.
-        await supabase
-          .from('conversation_members')
-          .update({ last_read_at: new Date().toISOString() })
-          .eq('conversation_id', conversationId)
-          .eq('user_id', session!.user.id);
+        // Read my own profile name once for typing-presence display.
+        const { data: meProf } = await supabase
+          .from('profiles')
+          .select('display_name')
+          .eq('id', session!.user.id)
+          .maybeSingle();
+        myDisplayNameRef.current = meProf?.display_name ?? null;
+
+        // Hydrate other members' last_read_at first (so "Read" doesn't flicker),
+        // then bump my own last_read_at to "now" so the partner sees we caught up.
+        await hydrateOtherReads();
+        await markRead();
       } catch (e: unknown) {
         if (!mounted) return;
         const msg = e instanceof Error ? e.message : 'Failed to load thread.';
@@ -321,8 +409,13 @@ export function useThread(conversationId: string | undefined): {
       }
     })();
 
+    // One channel for the whole conversation: new messages, member
+    // read-receipt updates, and typing presence broadcasts. Presence is
+    // keyed by user_id so each device contributes one "row" per user.
     const channel = supabase
-      .channel(`thread:${conversationId}`)
+      .channel(`conversation:${conversationId}`, {
+        config: { presence: { key: session!.user.id } },
+      })
       .on(
         'postgres_changes',
         {
@@ -346,38 +439,163 @@ export function useThread(conversationId: string | undefined): {
               ...cur,
               {
                 id: row.id,
-                body: row.body,
+                body: row.body ?? '',
                 sent_at: new Date(row.sent_at).getTime(),
                 sender_id: row.sender_id,
                 sender_name: senderRes?.display_name ?? null,
                 sender_initials: senderRes?.initials ?? null,
                 sender_avatar_url: senderRes?.avatar_url ?? null,
+                image_url: row.image_url ?? null,
+                image_width: row.image_width ?? null,
+                image_height: row.image_height ?? null,
               },
             ];
           });
+          // A new message from someone else while we're looking at the thread —
+          // bump my last_read_at so the sender sees a "Read" indicator.
+          if (row.sender_id !== session!.user.id) {
+            void markRead();
+          }
         },
       )
-      .subscribe();
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'conversation_members',
+          filter: `conversation_id=eq.${conversationId}`,
+        },
+        (payload) => {
+          const row = payload.new as {
+            user_id: string;
+            last_read_at: string;
+          };
+          if (row.user_id === session!.user.id) return;
+          setOtherReads((cur) => {
+            const lastReadAt = new Date(row.last_read_at).getTime();
+            const idx = cur.findIndex((r) => r.userId === row.user_id);
+            if (idx === -1) {
+              return [
+                ...cur,
+                { userId: row.user_id, displayName: null, lastReadAt },
+              ];
+            }
+            const next = cur.slice();
+            next[idx] = { ...next[idx], lastReadAt };
+            return next;
+          });
+        },
+      )
+      .on('presence', { event: 'sync' }, () => {
+        // Presence state: { [userId]: Array<{ typing: boolean, displayName?: string }> }
+        // We treat the user as typing iff ANY of their connected devices has
+        // typing=true (multi-tab edge case).
+        const state = channel.presenceState() as Record<
+          string,
+          { typing?: boolean; displayName?: string | null }[]
+        >;
+        const next: TypingState[] = [];
+        for (const [userId, metas] of Object.entries(state)) {
+          if (userId === session!.user.id) continue;
+          const anyTyping = metas.some((m) => m.typing === true);
+          if (anyTyping) {
+            next.push({
+              userId,
+              displayName: metas[0]?.displayName ?? null,
+            });
+          }
+        }
+        if (mounted) setTypingList(next);
+      })
+      .subscribe(async (status) => {
+        if (status === 'SUBSCRIBED') {
+          // Track an initial "not typing" state so other clients see us join
+          // the presence set immediately.
+          await channel.track({
+            typing: false,
+            displayName: myDisplayNameRef.current,
+          });
+        }
+      });
+
+    channelRef.current = channel;
 
     return () => {
       mounted = false;
+      if (typingTimerRef.current) {
+        clearTimeout(typingTimerRef.current);
+        typingTimerRef.current = null;
+      }
       supabase.removeChannel(channel);
+      channelRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [realSession, conversationId, session?.user.id]);
 
-  const send = async (body: string) => {
+  const send = async (args: SendArgs) => {
     if (!realSession || !conversationId) return;
-    const trimmed = body.trim();
-    if (!trimmed) return;
-    const { error: sendErr } = await supabase.from('messages').insert({
+    const trimmed = (args.body ?? '').trim();
+    const hasImage = !!args.image?.url;
+    if (!trimmed && !hasImage) return;
+    const payload: Record<string, unknown> = {
       conversation_id: conversationId,
       sender_id: session!.user.id,
-      body: trimmed,
-    });
+      body: trimmed.length > 0 ? trimmed : null,
+    };
+    if (hasImage && args.image) {
+      payload.image_url = args.image.url;
+      payload.image_width = args.image.width;
+      payload.image_height = args.image.height;
+    }
+    const { error: sendErr } = await supabase.from('messages').insert(payload);
     if (sendErr) {
       console.warn('[messaging] send failed:', sendErr.message);
       setError(sendErr.message);
+    } else if (channelRef.current && lastTypingSentRef.current) {
+      // Drop typing state on send so the indicator doesn't linger after we
+      // actually sent the message.
+      lastTypingSentRef.current = false;
+      void channelRef.current.track({
+        typing: false,
+        displayName: myDisplayNameRef.current,
+      });
+    }
+  };
+
+  // Typing-indicator debouncer. We broadcast `{ typing: true }` on the first
+  // keystroke (idempotent if we're already saying we're typing) and then
+  // `{ typing: false }` 1.5s after the last call.
+  const setTyping = (isTyping: boolean) => {
+    if (!channelRef.current) return;
+    if (typingTimerRef.current) {
+      clearTimeout(typingTimerRef.current);
+      typingTimerRef.current = null;
+    }
+    if (isTyping) {
+      if (!lastTypingSentRef.current) {
+        lastTypingSentRef.current = true;
+        void channelRef.current.track({
+          typing: true,
+          displayName: myDisplayNameRef.current,
+        });
+      }
+      typingTimerRef.current = setTimeout(() => {
+        if (channelRef.current && lastTypingSentRef.current) {
+          lastTypingSentRef.current = false;
+          void channelRef.current.track({
+            typing: false,
+            displayName: myDisplayNameRef.current,
+          });
+        }
+        typingTimerRef.current = null;
+      }, 1500);
+    } else if (lastTypingSentRef.current) {
+      lastTypingSentRef.current = false;
+      void channelRef.current.track({
+        typing: false,
+        displayName: myDisplayNameRef.current,
+      });
     }
   };
 
@@ -391,9 +609,22 @@ export function useThread(conversationId: string | undefined): {
       loading,
       error,
       send,
+      otherReads,
+      typing,
+      setTyping,
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [conversation, partnerName, partnerInitials, partnerAvatarUrl, messages, loading, error],
+    [
+      conversation,
+      partnerName,
+      partnerInitials,
+      partnerAvatarUrl,
+      messages,
+      loading,
+      error,
+      otherReads,
+      typing,
+    ],
   );
 }
 
@@ -438,4 +669,76 @@ export async function leaveHangout(hangoutId: string): Promise<boolean> {
     return false;
   }
   return true;
+}
+
+// ─────────────────────── Unread counts (deliverable 4) ───────────────────────
+
+/**
+ * Per-conversation unread message counts for the current user, plus the
+ * total across all conversations. Drives both the gold dot on Messages-tab
+ * rows and the global Messages tab-icon badge.
+ *
+ * One global realtime subscription on `messages` is used to invalidate the
+ * cache — we do NOT open a subscription per conversation in the DM list.
+ * The RLS policy on messages already restricts SELECTs to conversations
+ * the user is a member of, so the realtime stream naturally filters out
+ * unrelated rows.
+ */
+export function useUnreadCounts(): {
+  byConversation: Record<string, number>;
+  total: number;
+  refresh: () => Promise<void>;
+} {
+  const { session, isDev } = useAuth();
+  const realSession = !!session && !isDev;
+  const [byConversation, setByConversation] = useState<Record<string, number>>({});
+
+  const fetchCounts = async () => {
+    if (!realSession) {
+      setByConversation({});
+      return;
+    }
+    const { data, error } = await supabase.rpc('unread_counts_for_user', {
+      p_user_id: session!.user.id,
+    });
+    if (error) {
+      console.warn('[messaging] unread_counts_for_user failed:', error.message);
+      return;
+    }
+    const next: Record<string, number> = {};
+    for (const row of (data ?? []) as { conversation_id: string; unread: number }[]) {
+      next[row.conversation_id] = row.unread;
+    }
+    setByConversation(next);
+  };
+
+  useEffect(() => {
+    fetchCounts();
+    if (!realSession) return;
+    // ONE global subscription — RLS filters to conversations we're in.
+    const channel = supabase
+      .channel('unread-counts')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'messages' },
+        () => fetchCounts(),
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'conversation_members' },
+        () => fetchCounts(),
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [realSession, session?.user.id]);
+
+  const total = useMemo(
+    () => Object.values(byConversation).reduce((s, n) => s + n, 0),
+    [byConversation],
+  );
+
+  return { byConversation, total, refresh: fetchCounts };
 }

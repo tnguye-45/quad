@@ -1,9 +1,17 @@
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import {
+  FlatList,
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  View,
+} from 'react-native';
 
 import { Avatar } from '@/components/avatar';
 import { ScreenHeader } from '@/components/screen-header';
+import { SkeletonList } from '@/components/skeleton';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { IconSymbol } from '@/components/ui/icon-symbol';
@@ -26,12 +34,23 @@ const CATEGORY_EMOJI: Record<CatKey, string> = {
 
 export default function GigsScreen() {
   const [selected, setSelected] = useState<CatKey>('All');
+  const [refreshing, setRefreshing] = useState(false);
   const scheme = useColorScheme() ?? 'light';
   const c = Colors[scheme];
-  const { gigs, loading, hydrated } = usePosts();
+  const { gigs, loading, hydrated, error, refresh, loadMore, hasMore } = usePosts();
 
   const visible = selected === 'All' ? gigs : gigs.filter((g) => g.category === selected);
   const showLoading = !hydrated && loading && gigs.length === 0;
+  const isEmpty = hydrated && visible.length === 0;
+
+  async function onRefresh() {
+    setRefreshing(true);
+    try {
+      await refresh();
+    } finally {
+      setRefreshing(false);
+    }
+  }
 
   return (
     <ThemedView style={[styles.screen, { backgroundColor: c.background }]}>
@@ -52,66 +71,91 @@ export default function GigsScreen() {
         ]}
       />
 
-      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.storyRow}>
-          {CATEGORIES.map((cat) => {
-            const active = cat === selected;
-            return (
-              <Pressable
-                key={cat}
-                onPress={() => setSelected(cat)}
-                hitSlop={4}
-                style={styles.story}>
-                <View
-                  style={[
-                    styles.storyBubble,
-                    {
-                      borderColor: active ? c.accent : c.border,
-                      backgroundColor: active ? c.surface : c.background,
-                      borderWidth: active ? 2.5 : 1.5,
-                    },
-                  ]}>
-                  <ThemedText style={styles.storyEmoji}>
-                    {CATEGORY_EMOJI[cat]}
-                  </ThemedText>
-                </View>
-                <ThemedText
-                  style={[
-                    styles.storyLabel,
-                    { color: active ? c.text : c.textSecondary },
-                    active && styles.storyLabelActive,
-                  ]}
-                  type="mono">
-                  {cat.toLowerCase()}
-                </ThemedText>
-              </Pressable>
-            );
-          })}
-        </ScrollView>
-
-        <View style={[styles.divider, { backgroundColor: c.border }]} />
-
-        <View style={styles.list}>
-          {showLoading ? (
-            <ThemedText style={[styles.empty, { color: c.textSecondary }]}>
-              Loading…
-            </ThemedText>
-          ) : visible.length === 0 ? (
-            <ThemedText style={[styles.empty, { color: c.textSecondary }]}>
-              {gigs.length === 0
-                ? 'No gigs posted yet — be the first.'
-                : 'No gigs in this category yet.'}
-            </ThemedText>
-          ) : (
-            visible.map((gig) => <GigRow key={gig.id} gig={gig} c={c} />)
-          )}
-        </View>
-
-        <View style={{ height: 120 }} />
-      </ScrollView>
+      <FlatList
+        data={visible}
+        keyExtractor={(g) => g.id}
+        renderItem={({ item }) => <GigRow gig={item} c={c} />}
+        ListHeaderComponent={
+          <>
+            {error && !showLoading ? (
+              <RetryRow message="Couldn't load gigs." onRetry={refresh} c={c} />
+            ) : null}
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.storyRow}>
+              {CATEGORIES.map((cat) => {
+                const active = cat === selected;
+                return (
+                  <Pressable
+                    key={cat}
+                    onPress={() => setSelected(cat)}
+                    hitSlop={4}
+                    style={styles.story}>
+                    <View
+                      style={[
+                        styles.storyBubble,
+                        {
+                          borderColor: active ? c.accent : c.border,
+                          backgroundColor: active ? c.surface : c.background,
+                          borderWidth: active ? 2.5 : 1.5,
+                        },
+                      ]}>
+                      <ThemedText style={styles.storyEmoji}>
+                        {CATEGORY_EMOJI[cat]}
+                      </ThemedText>
+                    </View>
+                    <ThemedText
+                      style={[
+                        styles.storyLabel,
+                        { color: active ? c.text : c.textSecondary },
+                        active && styles.storyLabelActive,
+                      ]}
+                      type="mono">
+                      {cat.toLowerCase()}
+                    </ThemedText>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+            <View style={[styles.divider, { backgroundColor: c.border }]} />
+          </>
+        }
+        ListEmptyComponent={
+          showLoading ? (
+            <SkeletonList count={4} avatarSize={44} />
+          ) : isEmpty ? (
+            <EmptyState
+              c={c}
+              glyph="briefcase"
+              title="No gigs yet"
+              body={
+                selected === 'All'
+                  ? 'Be the first to post a gig — moving help, tutoring, rides…'
+                  : `No ${selected.toLowerCase()} gigs in the feed yet.`
+              }
+              ctaLabel="Post a gig"
+              onPress={() => router.push('/post-gig' as never)}
+            />
+          ) : null
+        }
+        contentContainerStyle={styles.scroll}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={c.textMuted}
+          />
+        }
+        onEndReachedThreshold={0.4}
+        onEndReached={() => {
+          if (selected === 'All' && hasMore.gigs) {
+            void loadMore('gigs');
+          }
+        }}
+        ListFooterComponent={<View style={{ height: 120 }} />}
+      />
     </ThemedView>
   );
 }
@@ -161,6 +205,65 @@ function GigRow({ gig, c }: { gig: Gig; c: (typeof Colors)['light'] }) {
   );
 }
 
+function EmptyState({
+  c,
+  glyph,
+  title,
+  body,
+  ctaLabel,
+  onPress,
+}: {
+  c: (typeof Colors)['light'];
+  glyph: Parameters<typeof IconSymbol>[0]['name'];
+  title: string;
+  body: string;
+  ctaLabel: string;
+  onPress: () => void;
+}) {
+  return (
+    <View style={styles.emptyBlock}>
+      <IconSymbol name={glyph} size={36} color={c.textMuted} />
+      <ThemedText style={[styles.emptyTitle, { color: c.text }]}>{title}</ThemedText>
+      <ThemedText style={[styles.emptyBody, { color: c.textSecondary }]}>
+        {body}
+      </ThemedText>
+      <Pressable
+        onPress={onPress}
+        style={({ pressed }) => [
+          styles.emptyCta,
+          { backgroundColor: c.tint, opacity: pressed ? 0.8 : 1 },
+        ]}>
+        <ThemedText style={[styles.emptyCtaText, { color: c.background }]}>
+          {ctaLabel}
+        </ThemedText>
+      </Pressable>
+    </View>
+  );
+}
+
+function RetryRow({
+  message,
+  onRetry,
+  c,
+}: {
+  message: string;
+  onRetry: () => void | Promise<void>;
+  c: (typeof Colors)['light'];
+}) {
+  return (
+    <Pressable
+      onPress={onRetry}
+      style={({ pressed }) => [
+        styles.retryRow,
+        { borderColor: c.border, opacity: pressed ? 0.6 : 1 },
+      ]}>
+      <ThemedText style={[styles.retryText, { color: c.danger }]} type="mono">
+        {message} Tap to retry.
+      </ThemedText>
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
@@ -201,9 +304,6 @@ const styles = StyleSheet.create({
   divider: {
     height: StyleSheet.hairlineWidth,
     marginHorizontal: 0,
-  },
-  list: {
-    paddingHorizontal: 0,
   },
   row: {
     flexDirection: 'row',
@@ -262,9 +362,44 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: -0.2,
   },
-  empty: {
-    fontSize: 13,
+  emptyBlock: {
+    alignItems: 'center',
+    paddingHorizontal: 32,
+    paddingTop: 80,
+    paddingBottom: 40,
+    gap: 12,
+  },
+  emptyTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    letterSpacing: -0.2,
+    marginTop: 4,
+  },
+  emptyBody: {
+    fontSize: 14,
+    lineHeight: 20,
     textAlign: 'center',
-    paddingVertical: 60,
+    color: '#5D6B85',
+  },
+  emptyCta: {
+    paddingHorizontal: 22,
+    paddingVertical: 12,
+    borderRadius: 999,
+    marginTop: 8,
+  },
+  emptyCtaText: {
+    fontSize: 13,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+  },
+  retryRow: {
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  retryText: {
+    fontSize: 11,
+    letterSpacing: 0.4,
+    textTransform: 'lowercase',
   },
 });

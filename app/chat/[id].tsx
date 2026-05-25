@@ -1,7 +1,13 @@
+import { Image } from 'expo-image';
+import * as ImagePicker from 'expo-image-picker';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import {
+  ActionSheetIOS,
+  Alert,
+  Dimensions,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -9,6 +15,16 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import {
+  Gesture,
+  GestureDetector,
+  GestureHandlerRootView,
+} from 'react-native-gesture-handler';
+import Animated, {
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
 
 import { Avatar } from '@/components/avatar';
 import { ThemedText } from '@/components/themed-text';
@@ -17,7 +33,13 @@ import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useAuth } from '@/lib/auth-context';
-import { useThread } from '@/lib/messaging';
+import {
+  useThread,
+  type MemberReadState,
+  type Message,
+  type TypingState,
+} from '@/lib/messaging';
+import { uploadMessageImage } from '@/lib/message-images';
 
 type Msg = { from: 'me' | 'them'; text: string; time?: string };
 
@@ -136,6 +158,8 @@ function formatStamp(ts: number, now = Date.now()): string {
 }
 
 const TIME_CLUSTER_GAP_MS = 5 * 60 * 1000;
+const SCREEN_W = Dimensions.get('window').width;
+const MAX_BUBBLE_IMAGE_W = Math.round(SCREEN_W * 0.62);
 
 export default function ChatScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -231,20 +255,100 @@ function RealChat({
     loading,
     send,
     conversation,
+    otherReads,
+    typing,
+    setTyping,
   } = useThread(conversationId);
   const [draft, setDraft] = useState('');
+  const [pendingImage, setPendingImage] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [expandedImage, setExpandedImage] = useState<string | null>(null);
   const scrollRef = useRef<ScrollView | null>(null);
 
   useEffect(() => {
     const t = setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 50);
     return () => clearTimeout(t);
-  }, [messages.length]);
+  }, [messages.length, typing.length]);
+
+  function handleDraftChange(value: string) {
+    setDraft(value);
+    setTyping(value.length > 0);
+  }
 
   async function handleSend() {
     const text = draft.trim();
-    if (!text) return;
-    setDraft('');
-    await send(text);
+    if (!text && !pendingImage) return;
+    if (pendingImage) {
+      setUploading(true);
+      const out = await uploadMessageImage(userId, pendingImage);
+      setUploading(false);
+      if ('error' in out) {
+        Alert.alert("Couldn't send image", out.error);
+        return;
+      }
+      setPendingImage(null);
+      setDraft('');
+      await send({
+        body: text || undefined,
+        image: { url: out.url, width: out.width, height: out.height },
+      });
+    } else {
+      setDraft('');
+      await send({ body: text });
+    }
+  }
+
+  async function pickFromLibrary() {
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) {
+      Alert.alert('Photo access needed', 'Allow photo access in Settings to send images.');
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: false,
+      quality: 1,
+    });
+    if (!result.canceled && result.assets[0]?.uri) {
+      setPendingImage(result.assets[0].uri);
+    }
+  }
+
+  async function pickFromCamera() {
+    const perm = await ImagePicker.requestCameraPermissionsAsync();
+    if (!perm.granted) {
+      Alert.alert('Camera access needed', 'Allow camera access in Settings to send photos.');
+      return;
+    }
+    const result = await ImagePicker.launchCameraAsync({
+      mediaTypes: ['images'],
+      allowsEditing: false,
+      quality: 1,
+    });
+    if (!result.canceled && result.assets[0]?.uri) {
+      setPendingImage(result.assets[0].uri);
+    }
+  }
+
+  function openAttachSheet() {
+    if (Platform.OS === 'ios') {
+      ActionSheetIOS.showActionSheetWithOptions(
+        {
+          options: ['Cancel', 'Take photo', 'Choose from library'],
+          cancelButtonIndex: 0,
+        },
+        (idx) => {
+          if (idx === 1) pickFromCamera();
+          else if (idx === 2) pickFromLibrary();
+        },
+      );
+    } else {
+      Alert.alert('Add a photo', undefined, [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Take photo', onPress: pickFromCamera },
+        { text: 'Choose from library', onPress: pickFromLibrary },
+      ]);
+    }
   }
 
   const contextLabel = conversation?.gig
@@ -254,76 +358,366 @@ function RealChat({
       : 'Conversation';
 
   return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      style={{ flex: 1 }}>
-      <ThemedView style={[styles.screen, { backgroundColor: c.background }]}>
-        <Header
-          colors={c}
-          name={partnerName}
-          context={contextLabel}
-          initials={partnerInitials}
-          avatarUri={partnerAvatarUrl}
-        />
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={{ flex: 1 }}>
+        <ThemedView style={[styles.screen, { backgroundColor: c.background }]}>
+          <Header
+            colors={c}
+            name={partnerName}
+            context={contextLabel}
+            initials={partnerInitials}
+            avatarUri={partnerAvatarUrl}
+          />
 
-        <ScrollView
-          ref={scrollRef}
-          contentContainerStyle={styles.messages}
-          showsVerticalScrollIndicator={false}>
-          {loading && messages.length === 0 ? (
-            <ThemedText style={[styles.loadingHint, { color: c.textMuted }]} type="mono">
-              loading…
-            </ThemedText>
-          ) : messages.length === 0 ? (
-            <ThemedText style={[styles.loadingHint, { color: c.textMuted }]} type="mono">
-              no messages yet — say hi
-            </ThemedText>
-          ) : (
-            messages.map((m, i) => {
-              const prev = messages[i - 1];
-              const showStamp =
-                !prev || m.sent_at - prev.sent_at > TIME_CLUSTER_GAP_MS;
-              const isMine = m.sender_id === userId;
-              return (
-                <View key={m.id ?? i}>
-                  {showStamp ? (
-                    <ThemedText
-                      style={[styles.clusterStamp, { color: c.textMuted }]}
-                      type="mono">
-                      {formatStamp(m.sent_at)}
-                    </ThemedText>
-                  ) : null}
-                  <View style={[styles.bubbleRow, isMine && styles.bubbleRowRight]}>
-                    <View
-                      style={[
-                        styles.bubble,
-                        isMine
-                          ? { backgroundColor: c.tint, borderBottomRightRadius: 4 }
-                          : { backgroundColor: c.subtle, borderBottomLeftRadius: 4 },
-                      ]}>
+          <ScrollView
+            ref={scrollRef}
+            contentContainerStyle={styles.messages}
+            showsVerticalScrollIndicator={false}>
+            {loading && messages.length === 0 ? (
+              <ThemedText style={[styles.loadingHint, { color: c.textMuted }]} type="mono">
+                loading…
+              </ThemedText>
+            ) : messages.length === 0 ? (
+              <ThemedText style={[styles.loadingHint, { color: c.textMuted }]} type="mono">
+                no messages yet — say hi
+              </ThemedText>
+            ) : (
+              messages.map((m, i) => {
+                const prev = messages[i - 1];
+                const showStamp =
+                  !prev || m.sent_at - prev.sent_at > TIME_CLUSTER_GAP_MS;
+                const isMine = m.sender_id === userId;
+                // Show the read-receipt row only beneath the latest *sent*
+                // message — adding it beneath every bubble is noisy and not
+                // what iMessage / IG DMs do.
+                const isLatestMine =
+                  isMine &&
+                  i ===
+                    (() => {
+                      for (let j = messages.length - 1; j >= 0; j--) {
+                        if (messages[j].sender_id === userId) return j;
+                      }
+                      return -1;
+                    })();
+                return (
+                  <View key={m.id ?? i}>
+                    {showStamp ? (
                       <ThemedText
-                        style={[
-                          styles.bubbleText,
-                          { color: isMine ? c.background : c.text },
-                        ]}>
-                        {m.body}
+                        style={[styles.clusterStamp, { color: c.textMuted }]}
+                        type="mono">
+                        {formatStamp(m.sent_at)}
                       </ThemedText>
+                    ) : null}
+                    <View style={[styles.bubbleRow, isMine && styles.bubbleRowRight]}>
+                      <MessageBubble
+                        message={m}
+                        isMine={isMine}
+                        c={c}
+                        onTapImage={(uri) => setExpandedImage(uri)}
+                      />
                     </View>
+                    {isLatestMine ? (
+                      <ReadReceiptRow
+                        message={m}
+                        otherReads={otherReads}
+                        c={c}
+                      />
+                    ) : null}
                   </View>
-                </View>
-              );
-            })
-          )}
-        </ScrollView>
+                );
+              })
+            )}
 
-        <InputBar
-          draft={draft}
-          setDraft={setDraft}
-          onSend={handleSend}
-          colors={c}
-        />
-      </ThemedView>
-    </KeyboardAvoidingView>
+            {typing.length > 0 ? (
+              <TypingIndicator typing={typing} c={c} />
+            ) : null}
+          </ScrollView>
+
+          {pendingImage ? (
+            <View
+              style={[
+                styles.pendingPreview,
+                { borderTopColor: c.border, backgroundColor: c.surface },
+              ]}>
+              <Image
+                source={{ uri: pendingImage }}
+                style={styles.pendingThumb}
+                contentFit="cover"
+              />
+              <Pressable
+                onPress={() => setPendingImage(null)}
+                hitSlop={8}
+                style={({ pressed }) => [
+                  styles.pendingClose,
+                  { backgroundColor: c.tint, opacity: pressed ? 0.7 : 1 },
+                ]}>
+                <IconSymbol name="xmark" size={12} color={c.background} />
+              </Pressable>
+              <ThemedText
+                style={[styles.pendingLabel, { color: c.textMuted }]}
+                type="mono">
+                {uploading ? 'uploading…' : 'ready to send'}
+              </ThemedText>
+            </View>
+          ) : null}
+
+          <InputBar
+            draft={draft}
+            setDraft={handleDraftChange}
+            onSend={handleSend}
+            onAttach={openAttachSheet}
+            colors={c}
+            disabled={uploading}
+            sendableOverride={!!pendingImage}
+          />
+        </ThemedView>
+      </KeyboardAvoidingView>
+
+      <ImageViewerModal
+        uri={expandedImage}
+        onClose={() => setExpandedImage(null)}
+        c={c}
+      />
+    </GestureHandlerRootView>
+  );
+}
+
+function TypingIndicator({
+  typing,
+  c,
+}: {
+  typing: TypingState[];
+  c: (typeof Colors)['light'];
+}) {
+  const firstName = (typing[0].displayName ?? 'Someone').split(' ')[0];
+  const label =
+    typing.length === 1
+      ? `${firstName} is typing…`
+      : typing.length === 2
+        ? `${firstName} and ${typing[1].displayName?.split(' ')[0] ?? 'someone'} are typing…`
+        : `${typing.length} people typing…`;
+  return (
+    <View style={styles.typingRow}>
+      <ThemedText
+        style={[styles.typingText, { color: c.textMuted }]}
+        type="mono">
+        {label}
+      </ThemedText>
+    </View>
+  );
+}
+
+function ReadReceiptRow({
+  message,
+  otherReads,
+  c,
+}: {
+  message: Message;
+  otherReads: MemberReadState[];
+  c: (typeof Colors)['light'];
+}) {
+  if (otherReads.length === 0) return null;
+  const readers = otherReads.filter((r) => r.lastReadAt >= message.sent_at);
+  if (readers.length === 0) return null;
+  // For a 1:1 thread (one other member), "Read" is enough. For groups, show
+  // a count so the user knows not everyone has seen it yet.
+  const label =
+    otherReads.length === 1 ? 'Read' : `Read by ${readers.length}`;
+  return (
+    <View style={styles.readRow}>
+      <ThemedText style={[styles.readText, { color: c.textMuted }]} type="mono">
+        {label}
+      </ThemedText>
+    </View>
+  );
+}
+
+function MessageBubble({
+  message,
+  isMine,
+  c,
+  onTapImage,
+}: {
+  message: Message;
+  isMine: boolean;
+  c: (typeof Colors)['light'];
+  onTapImage: (uri: string) => void;
+}) {
+  const hasImage = !!message.image_url;
+  const hasText = !!message.body && message.body.length > 0;
+
+  if (hasImage && message.image_url) {
+    const w = message.image_width ?? 1080;
+    const h = message.image_height ?? 1080;
+    const renderW = Math.min(MAX_BUBBLE_IMAGE_W, w);
+    const renderH = Math.round((h / w) * renderW);
+
+    return (
+      <View
+        style={[
+          styles.imageBubble,
+          isMine
+            ? { borderBottomRightRadius: 4 }
+            : { borderBottomLeftRadius: 4 },
+        ]}>
+        <Pressable
+          onPress={() => onTapImage(message.image_url!)}
+          style={({ pressed }) => ({ opacity: pressed ? 0.85 : 1 })}>
+          <Image
+            source={{ uri: message.image_url }}
+            style={{
+              width: renderW,
+              height: renderH,
+              borderRadius: 16,
+              backgroundColor: c.subtle,
+            }}
+            contentFit="cover"
+            transition={150}
+          />
+        </Pressable>
+        {hasText ? (
+          <ThemedText
+            style={[styles.imageCaption, { color: c.text }]}>
+            {message.body}
+          </ThemedText>
+        ) : null}
+      </View>
+    );
+  }
+
+  return (
+    <View
+      style={[
+        styles.bubble,
+        isMine
+          ? { backgroundColor: c.tint, borderBottomRightRadius: 4 }
+          : { backgroundColor: c.subtle, borderBottomLeftRadius: 4 },
+      ]}>
+      <ThemedText
+        style={[
+          styles.bubbleText,
+          { color: isMine ? c.background : c.text },
+        ]}>
+        {message.body}
+      </ThemedText>
+    </View>
+  );
+}
+
+function ImageViewerModal({
+  uri,
+  onClose,
+  c,
+}: {
+  uri: string | null;
+  onClose: () => void;
+  c: (typeof Colors)['light'];
+}) {
+  const scale = useSharedValue(1);
+  const savedScale = useSharedValue(1);
+  const translateX = useSharedValue(0);
+  const translateY = useSharedValue(0);
+  const savedTranslateX = useSharedValue(0);
+  const savedTranslateY = useSharedValue(0);
+
+  useEffect(() => {
+    if (uri) {
+      scale.value = 1;
+      savedScale.value = 1;
+      translateX.value = 0;
+      translateY.value = 0;
+      savedTranslateX.value = 0;
+      savedTranslateY.value = 0;
+    }
+  }, [uri, scale, savedScale, translateX, translateY, savedTranslateX, savedTranslateY]);
+
+  const pinch = Gesture.Pinch()
+    .onUpdate((e) => {
+      scale.value = Math.max(1, Math.min(5, savedScale.value * e.scale));
+    })
+    .onEnd(() => {
+      savedScale.value = scale.value;
+      if (scale.value < 1.05) {
+        scale.value = withTiming(1);
+        translateX.value = withTiming(0);
+        translateY.value = withTiming(0);
+        savedScale.value = 1;
+        savedTranslateX.value = 0;
+        savedTranslateY.value = 0;
+      }
+    });
+
+  const pan = Gesture.Pan()
+    .onUpdate((e) => {
+      if (scale.value > 1) {
+        translateX.value = savedTranslateX.value + e.translationX;
+        translateY.value = savedTranslateY.value + e.translationY;
+      }
+    })
+    .onEnd(() => {
+      savedTranslateX.value = translateX.value;
+      savedTranslateY.value = translateY.value;
+    });
+
+  const doubleTap = Gesture.Tap()
+    .numberOfTaps(2)
+    .onEnd(() => {
+      if (scale.value > 1) {
+        scale.value = withTiming(1);
+        translateX.value = withTiming(0);
+        translateY.value = withTiming(0);
+        savedScale.value = 1;
+        savedTranslateX.value = 0;
+        savedTranslateY.value = 0;
+      } else {
+        scale.value = withTiming(2.5);
+        savedScale.value = 2.5;
+      }
+    });
+
+  const composed = Gesture.Simultaneous(pinch, pan, doubleTap);
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    transform: [
+      { translateX: translateX.value },
+      { translateY: translateY.value },
+      { scale: scale.value },
+    ],
+  }));
+
+  return (
+    <Modal
+      visible={!!uri}
+      transparent
+      animationType="fade"
+      onRequestClose={onClose}>
+      <View style={styles.viewerBackdrop}>
+        <Pressable
+          onPress={onClose}
+          hitSlop={12}
+          style={({ pressed }) => [styles.viewerClose, { opacity: pressed ? 0.6 : 1 }]}>
+          <IconSymbol name="xmark" size={22} color="#FFFFFF" />
+        </Pressable>
+        {uri ? (
+          <GestureDetector gesture={composed}>
+            <Animated.View style={[styles.viewerImageWrap, animatedStyle]}>
+              <Image
+                source={{ uri }}
+                style={styles.viewerImage}
+                contentFit="contain"
+              />
+            </Animated.View>
+          </GestureDetector>
+        ) : null}
+        <ThemedText
+          style={[styles.viewerHint, { color: c.textMuted }]}
+          type="mono">
+          pinch to zoom · double-tap
+        </ThemedText>
+      </View>
+    </Modal>
   );
 }
 
@@ -415,20 +809,39 @@ function InputBar({
   draft,
   setDraft,
   onSend,
+  onAttach,
   colors: c,
+  disabled,
+  sendableOverride,
 }: {
   draft: string;
   setDraft: (v: string) => void;
   onSend: () => void;
+  onAttach?: () => void;
   colors: (typeof Colors)['light'];
+  disabled?: boolean;
+  sendableOverride?: boolean;
 }) {
-  const canSend = draft.trim().length > 0;
+  const canSend =
+    !disabled && (draft.trim().length > 0 || !!sendableOverride);
   return (
     <View
       style={[
         styles.inputBar,
         { borderTopColor: c.border, backgroundColor: c.background },
       ]}>
+      {onAttach ? (
+        <Pressable
+          onPress={onAttach}
+          disabled={disabled}
+          hitSlop={6}
+          style={({ pressed }) => [
+            styles.attachBtn,
+            { opacity: disabled ? 0.4 : pressed ? 0.6 : 1 },
+          ]}>
+          <IconSymbol name="plus" size={22} color={c.text} />
+        </Pressable>
+      ) : null}
       <View style={[styles.inputWrap, { backgroundColor: c.subtle, borderColor: c.border }]}>
         <TextInput
           value={draft}
@@ -438,6 +851,7 @@ function InputBar({
           placeholderTextColor={c.textMuted}
           returnKeyType="send"
           blurOnSubmit={false}
+          editable={!disabled}
           style={[styles.input, { color: c.text }]}
         />
       </View>
@@ -537,14 +951,79 @@ const styles = StyleSheet.create({
     fontSize: 15,
     lineHeight: 20,
   },
+  imageBubble: {
+    maxWidth: '78%',
+    borderRadius: 18,
+    overflow: 'hidden',
+  },
+  imageCaption: {
+    fontSize: 14,
+    lineHeight: 18,
+    paddingHorizontal: 4,
+    paddingTop: 4,
+  },
+  typingRow: {
+    alignItems: 'flex-start',
+    paddingTop: 4,
+    paddingBottom: 8,
+  },
+  typingText: {
+    fontSize: 11,
+    letterSpacing: 0.4,
+    textTransform: 'lowercase',
+  },
+  readRow: {
+    alignItems: 'flex-end',
+    paddingRight: 4,
+    paddingTop: 2,
+    paddingBottom: 4,
+  },
+  readText: {
+    fontSize: 10,
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
+  },
+  pendingPreview: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  pendingThumb: {
+    width: 48,
+    height: 48,
+    borderRadius: 8,
+  },
+  pendingClose: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pendingLabel: {
+    fontSize: 10,
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
+    flex: 1,
+  },
   inputBar: {
     flexDirection: 'row',
     alignItems: 'flex-end',
-    gap: 10,
-    paddingHorizontal: 14,
+    gap: 8,
+    paddingHorizontal: 12,
     paddingTop: 10,
     paddingBottom: 24,
     borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  attachBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   inputWrap: {
     flex: 1,
@@ -578,4 +1057,39 @@ const styles = StyleSheet.create({
     letterSpacing: -0.4,
   },
   emptyBody: { fontSize: 14, textAlign: 'center', lineHeight: 20 },
+  viewerBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.96)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  viewerClose: {
+    position: 'absolute',
+    top: 60,
+    right: 24,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    zIndex: 2,
+  },
+  viewerImageWrap: {
+    width: '100%',
+    height: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  viewerImage: {
+    width: '100%',
+    height: '100%',
+  },
+  viewerHint: {
+    position: 'absolute',
+    bottom: 48,
+    fontSize: 10,
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
+  },
 });

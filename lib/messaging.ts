@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { useAuth } from './auth-context';
 import { supabase } from './supabase';
@@ -254,6 +254,12 @@ export type MemberReadState = {
   lastReadAt: number;
 };
 
+/** Typing presence for the active conversation. Keyed by user_id. */
+export type TypingState = {
+  userId: string;
+  displayName: string | null;
+};
+
 export function useThread(conversationId: string | undefined): {
   conversation: ConversationRow | null;
   partnerName: string;
@@ -265,6 +271,10 @@ export function useThread(conversationId: string | undefined): {
   send: (args: SendArgs) => Promise<void>;
   /** Other members' last_read_at timestamps (ms epoch). Excludes the caller. */
   otherReads: MemberReadState[];
+  /** Other members typing right now. Excludes the caller. */
+  typing: TypingState[];
+  /** Mark a typing intent. Debounced to send "false" 1.5s after last call. */
+  setTyping: (isTyping: boolean) => void;
 } {
   const { session, isDev } = useAuth();
   const realSession = !!session && !isDev;
@@ -276,6 +286,14 @@ export function useThread(conversationId: string | undefined): {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [otherReads, setOtherReads] = useState<MemberReadState[]>([]);
+  const [typing, setTypingList] = useState<TypingState[]>([]);
+
+  // Stable refs the typing debouncer reads — we can't capture changing state
+  // in the debounce timer without rescheduling on every keypress.
+  const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+  const myDisplayNameRef = useRef<string | null>(null);
+  const lastTypingSentRef = useRef<boolean>(false);
+  const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -369,6 +387,14 @@ export function useThread(conversationId: string | undefined): {
           setPartnerInitials(partner.user.initials ?? '?');
           setPartnerAvatarUrl(partner.user.avatar_url ?? null);
         }
+        // Read my own profile name once for typing-presence display.
+        const { data: meProf } = await supabase
+          .from('profiles')
+          .select('display_name')
+          .eq('id', session!.user.id)
+          .maybeSingle();
+        myDisplayNameRef.current = meProf?.display_name ?? null;
+
         // Hydrate other members' last_read_at first (so "Read" doesn't flicker),
         // then bump my own last_read_at to "now" so the partner sees we caught up.
         await hydrateOtherReads();
@@ -383,11 +409,13 @@ export function useThread(conversationId: string | undefined): {
       }
     })();
 
-    // One channel for the whole conversation: new messages + member
-    // read-receipt updates flow through the same subscription so we open at
-    // most one realtime connection per active thread.
+    // One channel for the whole conversation: new messages, member
+    // read-receipt updates, and typing presence broadcasts. Presence is
+    // keyed by user_id so each device contributes one "row" per user.
     const channel = supabase
-      .channel(`conversation:${conversationId}`)
+      .channel(`conversation:${conversationId}`, {
+        config: { presence: { key: session!.user.id } },
+      })
       .on(
         'postgres_changes',
         {
@@ -459,11 +487,48 @@ export function useThread(conversationId: string | undefined): {
           });
         },
       )
-      .subscribe();
+      .on('presence', { event: 'sync' }, () => {
+        // Presence state: { [userId]: Array<{ typing: boolean, displayName?: string }> }
+        // We treat the user as typing iff ANY of their connected devices has
+        // typing=true (multi-tab edge case).
+        const state = channel.presenceState() as Record<
+          string,
+          { typing?: boolean; displayName?: string | null }[]
+        >;
+        const next: TypingState[] = [];
+        for (const [userId, metas] of Object.entries(state)) {
+          if (userId === session!.user.id) continue;
+          const anyTyping = metas.some((m) => m.typing === true);
+          if (anyTyping) {
+            next.push({
+              userId,
+              displayName: metas[0]?.displayName ?? null,
+            });
+          }
+        }
+        if (mounted) setTypingList(next);
+      })
+      .subscribe(async (status) => {
+        if (status === 'SUBSCRIBED') {
+          // Track an initial "not typing" state so other clients see us join
+          // the presence set immediately.
+          await channel.track({
+            typing: false,
+            displayName: myDisplayNameRef.current,
+          });
+        }
+      });
+
+    channelRef.current = channel;
 
     return () => {
       mounted = false;
+      if (typingTimerRef.current) {
+        clearTimeout(typingTimerRef.current);
+        typingTimerRef.current = null;
+      }
       supabase.removeChannel(channel);
+      channelRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [realSession, conversationId, session?.user.id]);
@@ -487,6 +552,50 @@ export function useThread(conversationId: string | undefined): {
     if (sendErr) {
       console.warn('[messaging] send failed:', sendErr.message);
       setError(sendErr.message);
+    } else if (channelRef.current && lastTypingSentRef.current) {
+      // Drop typing state on send so the indicator doesn't linger after we
+      // actually sent the message.
+      lastTypingSentRef.current = false;
+      void channelRef.current.track({
+        typing: false,
+        displayName: myDisplayNameRef.current,
+      });
+    }
+  };
+
+  // Typing-indicator debouncer. We broadcast `{ typing: true }` on the first
+  // keystroke (idempotent if we're already saying we're typing) and then
+  // `{ typing: false }` 1.5s after the last call.
+  const setTyping = (isTyping: boolean) => {
+    if (!channelRef.current) return;
+    if (typingTimerRef.current) {
+      clearTimeout(typingTimerRef.current);
+      typingTimerRef.current = null;
+    }
+    if (isTyping) {
+      if (!lastTypingSentRef.current) {
+        lastTypingSentRef.current = true;
+        void channelRef.current.track({
+          typing: true,
+          displayName: myDisplayNameRef.current,
+        });
+      }
+      typingTimerRef.current = setTimeout(() => {
+        if (channelRef.current && lastTypingSentRef.current) {
+          lastTypingSentRef.current = false;
+          void channelRef.current.track({
+            typing: false,
+            displayName: myDisplayNameRef.current,
+          });
+        }
+        typingTimerRef.current = null;
+      }, 1500);
+    } else if (lastTypingSentRef.current) {
+      lastTypingSentRef.current = false;
+      void channelRef.current.track({
+        typing: false,
+        displayName: myDisplayNameRef.current,
+      });
     }
   };
 
@@ -501,6 +610,8 @@ export function useThread(conversationId: string | undefined): {
       error,
       send,
       otherReads,
+      typing,
+      setTyping,
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [
@@ -512,6 +623,7 @@ export function useThread(conversationId: string | undefined): {
       loading,
       error,
       otherReads,
+      typing,
     ],
   );
 }

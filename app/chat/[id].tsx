@@ -33,7 +33,12 @@ import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useAuth } from '@/lib/auth-context';
-import { useThread, type MemberReadState, type Message } from '@/lib/messaging';
+import {
+  useThread,
+  type MemberReadState,
+  type Message,
+  type TypingState,
+} from '@/lib/messaging';
 import { uploadMessageImage } from '@/lib/message-images';
 
 type Msg = { from: 'me' | 'them'; text: string; time?: string };
@@ -251,6 +256,8 @@ function RealChat({
     send,
     conversation,
     otherReads,
+    typing,
+    setTyping,
   } = useThread(conversationId);
   const [draft, setDraft] = useState('');
   const [pendingImage, setPendingImage] = useState<string | null>(null);
@@ -261,7 +268,12 @@ function RealChat({
   useEffect(() => {
     const t = setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 50);
     return () => clearTimeout(t);
-  }, [messages.length]);
+  }, [messages.length, typing.length]);
+
+  function handleDraftChange(value: string) {
+    setDraft(value);
+    setTyping(value.length > 0);
+  }
 
   async function handleSend() {
     const text = draft.trim();
@@ -417,6 +429,10 @@ function RealChat({
                 );
               })
             )}
+
+            {typing.length > 0 ? (
+              <TypingIndicator typing={typing} c={c} />
+            ) : null}
           </ScrollView>
 
           {pendingImage ? (
@@ -449,7 +465,7 @@ function RealChat({
 
           <InputBar
             draft={draft}
-            setDraft={setDraft}
+            setDraft={handleDraftChange}
             onSend={handleSend}
             onAttach={openAttachSheet}
             colors={c}
@@ -465,6 +481,31 @@ function RealChat({
         c={c}
       />
     </GestureHandlerRootView>
+  );
+}
+
+function TypingIndicator({
+  typing,
+  c,
+}: {
+  typing: TypingState[];
+  c: (typeof Colors)['light'];
+}) {
+  const firstName = (typing[0].displayName ?? 'Someone').split(' ')[0];
+  const label =
+    typing.length === 1
+      ? `${firstName} is typing…`
+      : typing.length === 2
+        ? `${firstName} and ${typing[1].displayName?.split(' ')[0] ?? 'someone'} are typing…`
+        : `${typing.length} people typing…`;
+  return (
+    <View style={styles.typingRow}>
+      <ThemedText
+        style={[styles.typingText, { color: c.textMuted }]}
+        type="mono">
+        {label}
+      </ThemedText>
+    </View>
   );
 }
 
@@ -920,6 +961,16 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     paddingHorizontal: 4,
     paddingTop: 4,
+  },
+  typingRow: {
+    alignItems: 'flex-start',
+    paddingTop: 4,
+    paddingBottom: 8,
+  },
+  typingText: {
+    fontSize: 11,
+    letterSpacing: 0.4,
+    textTransform: 'lowercase',
   },
   readRow: {
     alignItems: 'flex-end',

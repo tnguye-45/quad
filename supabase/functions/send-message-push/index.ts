@@ -153,11 +153,25 @@ async function resolveRecipientTokens(
   );
   if (members.length === 0) return [];
 
-  // 2) Their push tokens (one row per user; PK is user_id).
   const userIds = members.map((m) => m.user_id);
   const inList = userIds.map(encodeURIComponent).join(',');
+
+  // 2) Notification preferences for `messages`. Missing row → opt-in (default
+  // true). We .catch the lookup so deployments where 0015 hasn't been applied
+  // yet still send pushes (they just skip the filter step).
+  const prefs = await pgSelect<{ user_id: string; messages: boolean }>(
+    `notification_prefs?user_id=in.(${inList})&select=user_id,messages`,
+  ).catch(() => [] as { user_id: string; messages: boolean }[]);
+  const optedOut = new Set(
+    prefs.filter((p) => p.messages === false).map((p) => p.user_id),
+  );
+  const allowedIds = userIds.filter((id) => !optedOut.has(id));
+  if (allowedIds.length === 0) return [];
+
+  // 3) Their push tokens (one row per user; PK is user_id).
+  const allowedList = allowedIds.map(encodeURIComponent).join(',');
   const tokens = await pgSelect<{ user_id: string; expo_push_token: string }>(
-    `user_push_tokens?user_id=in.(${inList})&select=user_id,expo_push_token`,
+    `user_push_tokens?user_id=in.(${allowedList})&select=user_id,expo_push_token`,
   );
   return tokens
     .filter((t) => typeof t.expo_push_token === 'string' && t.expo_push_token.length > 0)

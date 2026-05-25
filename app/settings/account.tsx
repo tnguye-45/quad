@@ -133,6 +133,38 @@ export default function AccountSettingsScreen() {
             <ThemedText
               style={[styles.sectionLabel, { color: c.textMuted }]}
               type="mono">
+              preferences
+            </ThemedText>
+            <View style={styles.linkList}>
+              <Link href="/settings/notifications" asChild>
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.linkRow,
+                    { borderBottomColor: c.border, opacity: pressed ? 0.5 : 1 },
+                  ]}>
+                  <ThemedText style={[styles.linkLabel, { color: c.text }]}>
+                    Notifications
+                  </ThemedText>
+                </Pressable>
+              </Link>
+              <Link href="/settings/blocked" asChild>
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.linkRow,
+                    { borderBottomColor: c.border, opacity: pressed ? 0.5 : 1 },
+                  ]}>
+                  <ThemedText style={[styles.linkLabel, { color: c.text }]}>
+                    Blocked users
+                  </ThemedText>
+                </Pressable>
+              </Link>
+            </View>
+          </View>
+
+          <View style={[styles.section, { borderTopColor: c.border }]}>
+            <ThemedText
+              style={[styles.sectionLabel, { color: c.textMuted }]}
+              type="mono">
               legal
             </ThemedText>
             <View style={styles.linkList}>

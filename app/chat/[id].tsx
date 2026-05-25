@@ -10,6 +10,7 @@ import {
   View,
 } from 'react-native';
 
+import { Avatar } from '@/components/avatar';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { IconSymbol } from '@/components/ui/icon-symbol';
@@ -158,12 +159,14 @@ function Header({
   name,
   context,
   initials,
+  avatarUri,
   online,
 }: {
   colors: (typeof Colors)['light'];
   name: string;
   context: string;
   initials?: string;
+  avatarUri?: string | null;
   online?: boolean;
 }) {
   return (
@@ -175,8 +178,8 @@ function Header({
         <IconSymbol name="chevron.left" size={26} color={c.text} />
       </Pressable>
       {initials ? (
-        <View style={[styles.headerAvatar, { backgroundColor: c.subtle, borderColor: c.borderStrong }]}>
-          <ThemedText style={[styles.headerAvatarText, { color: c.text }]}>{initials}</ThemedText>
+        <View style={styles.headerAvatarWrap}>
+          <Avatar uri={avatarUri} initials={initials} size={38} textSize={12} />
           {online ? (
             <View style={[styles.onlineDot, { backgroundColor: '#22C55E', borderColor: c.background }]} />
           ) : null}
@@ -220,9 +223,15 @@ function RealChat({
   colors: (typeof Colors)['light'];
   userId: string;
 }) {
-  const { messages, partnerName, partnerInitials, loading, send, conversation } = useThread(
-    conversationId,
-  );
+  const {
+    messages,
+    partnerName,
+    partnerInitials,
+    partnerAvatarUrl,
+    loading,
+    send,
+    conversation,
+  } = useThread(conversationId);
   const [draft, setDraft] = useState('');
   const scrollRef = useRef<ScrollView | null>(null);
 
@@ -254,6 +263,7 @@ function RealChat({
           name={partnerName}
           context={contextLabel}
           initials={partnerInitials}
+          avatarUri={partnerAvatarUrl}
         />
 
         <ScrollView
@@ -469,17 +479,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  headerAvatar: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    borderWidth: StyleSheet.hairlineWidth,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  headerAvatarText: {
-    fontSize: 12,
-    fontWeight: '700',
+  headerAvatarWrap: {
+    position: 'relative',
   },
   onlineDot: {
     position: 'absolute',

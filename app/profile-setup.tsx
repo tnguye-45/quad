@@ -1,3 +1,4 @@
+import * as ImagePicker from 'expo-image-picker';
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
 import {
@@ -10,11 +11,13 @@ import {
   View,
 } from 'react-native';
 
+import { Avatar } from '@/components/avatar';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useAuth, type ProfileLink } from '@/lib/auth-context';
+import { uploadAvatar } from '@/lib/avatars';
 import { detectPlatform, PLATFORMS, type Platform as LinkPlatform } from '@/lib/profile-links';
 import { supabase } from '@/lib/supabase';
 
@@ -47,6 +50,8 @@ export default function ProfileSetupScreen() {
   const [dorm, setDorm] = useState(profile?.dorm ?? '');
   const [bio, setBio] = useState(profile?.bio ?? '');
   const [links, setLinks] = useState<ProfileLink[]>(profile?.links ?? []);
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(profile?.avatar_url ?? null);
+  const [avatarBusy, setAvatarBusy] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -58,7 +63,42 @@ export default function ProfileSetupScreen() {
     setDorm((cur) => cur || profile.dorm || '');
     setBio((cur) => cur || profile.bio || '');
     setLinks((cur) => (cur.length > 0 ? cur : profile.links));
+    setAvatarUrl((cur) => cur ?? profile.avatar_url);
   }, [profile]);
+
+  async function handlePickAvatar() {
+    if (!session) return;
+    setErr(null);
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) {
+      setErr('Allow photo access in Settings to set an avatar.');
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.85,
+    });
+    if (result.canceled) return;
+    const asset = result.assets[0];
+    if (!asset?.uri) return;
+    if (isDev) {
+      setAvatarUrl(asset.uri);
+      return;
+    }
+    setAvatarBusy(true);
+    const out = await uploadAvatar(session.user.id, asset.uri, asset.mimeType ?? 'image/jpeg');
+    setAvatarBusy(false);
+    if (out.error) {
+      setErr(out.error);
+      return;
+    }
+    if (out.url) {
+      setAvatarUrl(out.url);
+      refreshProfile().catch(() => {});
+    }
+  }
 
   const canSubmit =
     displayName.trim().length >= 2 && year !== null && major.trim().length >= 2 && !busy;
@@ -160,6 +200,39 @@ export default function ProfileSetupScreen() {
             </ThemedText>
             <ThemedText style={[styles.tagline, { color: c.textSecondary }]}>
               So other students know who&apos;s offering or asking.
+            </ThemedText>
+          </View>
+
+          <View style={styles.avatarBlock}>
+            <Pressable
+              onPress={handlePickAvatar}
+              disabled={avatarBusy}
+              hitSlop={8}
+              style={({ pressed }) => [
+                styles.avatarPress,
+                { opacity: avatarBusy ? 0.5 : pressed ? 0.7 : 1 },
+              ]}>
+              <Avatar
+                uri={avatarUrl}
+                initials={
+                  profile?.initials || computeInitials(displayName) || '?'
+                }
+                size={96}
+              />
+              <View
+                style={[
+                  styles.avatarEditPill,
+                  { backgroundColor: c.tint, borderColor: c.background },
+                ]}>
+                <ThemedText
+                  style={[styles.avatarEditText, { color: c.background }]}
+                  type="mono">
+                  {avatarBusy ? '…' : avatarUrl ? 'change' : 'add'}
+                </ThemedText>
+              </View>
+            </Pressable>
+            <ThemedText style={[styles.avatarHint, { color: c.textMuted }]} type="mono">
+              tap to {avatarUrl ? 'change' : 'add'} photo
             </ThemedText>
           </View>
 
@@ -421,6 +494,28 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
     marginTop: 4,
+  },
+  avatarBlock: { alignItems: 'center', gap: 10 },
+  avatarPress: { position: 'relative' },
+  avatarEditPill: {
+    position: 'absolute',
+    bottom: -2,
+    right: -2,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
+    borderWidth: 2,
+  },
+  avatarEditText: {
+    fontSize: 10,
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+    fontWeight: '700',
+  },
+  avatarHint: {
+    fontSize: 10,
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
   },
   fieldGroup: { gap: 10 },
   labelRow: {

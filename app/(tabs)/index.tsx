@@ -2,6 +2,7 @@ import { router } from 'expo-router';
 import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
+import { Avatar } from '@/components/avatar';
 import { ScreenHeader } from '@/components/screen-header';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -118,6 +119,7 @@ export default function GigsScreen() {
 function GigRow({ gig, c }: { gig: Gig; c: (typeof Colors)['light'] }) {
   const poster = gig.anonymous || !gig.posterName ? 'anonymous' : gig.posterName;
   const initials = gig.anonymous || !gig.posterInitials ? '?' : gig.posterInitials;
+  const avatarUri = gig.anonymous ? null : gig.posterAvatarUrl;
 
   return (
     <Pressable
@@ -126,9 +128,7 @@ function GigRow({ gig, c }: { gig: Gig; c: (typeof Colors)['light'] }) {
         { borderBottomColor: c.border, opacity: pressed ? 0.5 : 1 },
       ]}
       onPress={() => router.push({ pathname: '/gig/[id]', params: { id: gig.id } })}>
-      <View style={[styles.rowAvatar, { borderColor: c.border, backgroundColor: c.subtle }]}>
-        <ThemedText style={[styles.rowAvatarText, { color: c.text }]}>{initials}</ThemedText>
-      </View>
+      <Avatar uri={avatarUri} initials={initials} size={44} textSize={13} />
 
       <View style={styles.rowMain}>
         <View style={styles.rowTop}>
@@ -212,18 +212,6 @@ const styles = StyleSheet.create({
     gap: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
     alignItems: 'flex-start',
-  },
-  rowAvatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    borderWidth: StyleSheet.hairlineWidth,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  rowAvatarText: {
-    fontSize: 13,
-    fontWeight: '700',
   },
   rowMain: {
     flex: 1,

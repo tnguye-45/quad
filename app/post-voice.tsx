@@ -56,6 +56,7 @@ export default function PostVoiceScreen() {
         ownerId: session.user.id,
         posterName: profile?.display_name ?? null,
         posterInitials: profile?.initials ?? null,
+        posterAvatarUrl: profile?.avatar_url ?? null,
       });
       router.back();
     } catch (e: unknown) {

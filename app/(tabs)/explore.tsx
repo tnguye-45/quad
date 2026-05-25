@@ -1,5 +1,6 @@
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
+import { Avatar } from '@/components/avatar';
 import { ScreenHeader } from '@/components/screen-header';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -74,15 +75,12 @@ function HangoutCard({
     hangout.anonymous || !hangout.hostName ? 'anonymous host' : hangout.hostName;
   const hostInitials =
     hangout.anonymous || !hangout.hostInitials ? '?' : hangout.hostInitials;
+  const hostAvatarUri = hangout.anonymous ? null : hangout.hostAvatarUrl;
 
   return (
     <View style={[styles.card, { borderBottomColor: c.border }]}>
       <View style={styles.cardHead}>
-        <View style={[styles.hostAvatar, { borderColor: c.border, backgroundColor: c.subtle }]}>
-          <ThemedText style={[styles.hostInitials, { color: c.text }]}>
-            {hostInitials}
-          </ThemedText>
-        </View>
+        <Avatar uri={hostAvatarUri} initials={hostInitials} size={38} textSize={12} />
         <View style={styles.cardHeadText}>
           <ThemedText style={[styles.host, { color: c.text }]}>{hostLabel}</ThemedText>
           <ThemedText style={[styles.vibeText, { color: c.textMuted }]} type="mono">
@@ -143,18 +141,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-  },
-  hostAvatar: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    borderWidth: StyleSheet.hairlineWidth,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  hostInitials: {
-    fontSize: 12,
-    fontWeight: '700',
   },
   cardHeadText: {
     flex: 1,

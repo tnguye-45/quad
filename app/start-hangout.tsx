@@ -69,6 +69,7 @@ export default function StartHangoutScreen() {
         ownerId: session.user.id,
         hostName: profile?.display_name ?? null,
         hostInitials: profile?.initials ?? null,
+        hostAvatarUrl: profile?.avatar_url ?? null,
       });
       router.back();
     } catch (e: unknown) {

@@ -1,6 +1,7 @@
 import { router } from 'expo-router';
 import { Pressable, StyleSheet, View } from 'react-native';
 
+import { Avatar } from '@/components/avatar';
 import { NamePlaque } from '@/components/logo';
 import { ThemedText } from '@/components/themed-text';
 import { IconSymbol } from '@/components/ui/icon-symbol';
@@ -53,13 +54,13 @@ export function ScreenHeader({
               onPress={() => router.push('/modal')}
               accessibilityLabel="Open your profile"
               hitSlop={6}
-              style={({ pressed }) => [
-                styles.avatar,
-                { borderColor: c.borderStrong, opacity: pressed ? 0.5 : 1 },
-              ]}>
-              <ThemedText style={[styles.avatarText, { color: c.text }]}>
-                {profile?.initials || '?'}
-              </ThemedText>
+              style={({ pressed }) => [{ opacity: pressed ? 0.5 : 1 }]}>
+              <Avatar
+                uri={profile?.avatar_url}
+                initials={profile?.initials}
+                size={32}
+                textSize={11}
+              />
             </Pressable>
           )}
         </View>
@@ -98,18 +99,6 @@ const styles = StyleSheet.create({
     height: 32,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  avatar: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    borderWidth: StyleSheet.hairlineWidth,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarText: {
-    fontSize: 11,
-    fontWeight: '700',
   },
   titleRow: {
     marginTop: 18,

@@ -1,6 +1,7 @@
 import { router } from 'expo-router';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
+import { Avatar } from '@/components/avatar';
 import { ScreenHeader } from '@/components/screen-header';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -80,16 +81,15 @@ export default function MessagesScreen() {
               const isReal = '__real' in co;
               const name = isReal ? co.partnerName : co.name;
               const initials = isReal ? co.partnerInitials : co.initials;
+              const avatarUri = isReal ? co.partnerAvatarUrl : null;
               return (
                 <Pressable
                   key={co.id}
                   onPress={() => router.push(`/chat/${co.id}` as never)}
                   hitSlop={4}
                   style={styles.activeItem}>
-                  <View style={[styles.activeAvatar, { borderColor: c.borderStrong, backgroundColor: c.subtle }]}>
-                    <ThemedText style={[styles.activeInitials, { color: c.text }]}>
-                      {initials}
-                    </ThemedText>
+                  <View style={styles.activeAvatarWrap}>
+                    <Avatar uri={avatarUri} initials={initials} size={56} textSize={14} />
                     <View style={[styles.activeDot, { backgroundColor: '#22c55e', borderColor: c.background }]} />
                   </View>
                   <ThemedText
@@ -127,6 +127,7 @@ export default function MessagesScreen() {
             const isReal = '__real' in co;
             const name = isReal ? co.partnerName : co.name;
             const initials = isReal ? co.partnerInitials : co.initials;
+            const avatarUri = isReal ? co.partnerAvatarUrl : null;
             const context = isReal ? co.contextLabel : co.context;
             const preview = isReal ? co.preview : co.preview;
             const time = isReal ? timeAgo(co.preview_at) : co.time;
@@ -139,11 +140,7 @@ export default function MessagesScreen() {
                   styles.row,
                   { opacity: pressed ? 0.5 : 1 },
                 ]}>
-                <View style={[styles.avatar, { borderColor: c.border, backgroundColor: c.subtle }]}>
-                  <ThemedText style={[styles.avatarText, { color: c.text }]}>
-                    {initials}
-                  </ThemedText>
-                </View>
+                <Avatar uri={avatarUri} initials={initials} size={52} textSize={14} />
 
                 <View style={styles.rowMain}>
                   <View style={styles.rowTop}>
@@ -206,18 +203,8 @@ const styles = StyleSheet.create({
     gap: 6,
     width: 64,
   },
-  activeAvatar: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    borderWidth: 1.5,
-    alignItems: 'center',
-    justifyContent: 'center',
+  activeAvatarWrap: {
     position: 'relative',
-  },
-  activeInitials: {
-    fontSize: 14,
-    fontWeight: '700',
   },
   activeDot: {
     position: 'absolute',
@@ -242,18 +229,6 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     gap: 14,
     alignItems: 'center',
-  },
-  avatar: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    borderWidth: StyleSheet.hairlineWidth,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarText: {
-    fontSize: 14,
-    fontWeight: '700',
   },
   rowMain: {
     flex: 1,

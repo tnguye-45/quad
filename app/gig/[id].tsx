@@ -2,6 +2,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
+import { Avatar } from '@/components/avatar';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { IconSymbol } from '@/components/ui/icon-symbol';
@@ -61,6 +62,7 @@ export default function GigDetailScreen() {
     gig.anonymous || !gig.posterName ? 'Anonymous student' : gig.posterName;
   const posterInitials =
     gig.anonymous || !gig.posterInitials ? '?' : gig.posterInitials;
+  const posterAvatarUri = gig.anonymous ? null : gig.posterAvatarUrl;
   const canMessage = !isOwn && !gig.anonymous && gig.ownerId !== 'seed';
   const firstName = gig.posterName?.split(' ')[0] ?? 'poster';
 
@@ -111,15 +113,12 @@ export default function GigDetailScreen() {
         </View>
 
         <View style={[styles.posterRow, { borderTopColor: c.border, borderBottomColor: c.border }]}>
-          <View
-            style={[
-              styles.posterAvatar,
-              { backgroundColor: c.subtle, borderColor: c.borderStrong },
-            ]}>
-            <ThemedText style={[styles.posterAvatarText, { color: c.text }]}>
-              {posterInitials}
-            </ThemedText>
-          </View>
+          <Avatar
+            uri={posterAvatarUri}
+            initials={posterInitials}
+            size={44}
+            textSize={14}
+          />
           <View style={{ flex: 1 }}>
             <ThemedText style={[styles.posterName, { color: c.text }]}>
               {posterLabel}
@@ -252,15 +251,6 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  posterAvatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    borderWidth: StyleSheet.hairlineWidth,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  posterAvatarText: { fontSize: 14, fontWeight: '700' },
   posterName: { fontSize: 15, fontWeight: '700' },
   posterHint: {
     fontSize: 10,

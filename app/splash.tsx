@@ -35,7 +35,9 @@ export default function SplashScreen() {
               styles.playButton,
               {
                 backgroundColor: c.tint,
-                shadowOpacity: pressed ? 0.1 : 0.25,
+                boxShadow: pressed
+                  ? '0px 8px 20px rgba(0, 0, 0, 0.1)'
+                  : '0px 8px 20px rgba(0, 0, 0, 0.25)',
               },
             ]}>
             <View style={[styles.playTriangle, { borderLeftColor: c.background }]} />
@@ -84,9 +86,6 @@ const styles = StyleSheet.create({
     borderRadius: 65,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#000',
-    shadowRadius: 20,
-    shadowOffset: { width: 0, height: 8 },
     elevation: 8,
   },
   playTriangle: {

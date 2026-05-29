@@ -251,10 +251,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderRadius: 24,
     borderWidth: StyleSheet.hairlineWidth,
-    shadowColor: '#0C2340',
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 2 },
+    boxShadow: '0px 2px 8px rgba(12, 35, 64, 0.08)',
     elevation: 3,
   },
   backBtn: {
@@ -289,10 +286,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderRadius: 24,
     borderWidth: StyleSheet.hairlineWidth,
-    shadowColor: '#0C2340',
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 2 },
+    boxShadow: '0px 2px 8px rgba(12, 35, 64, 0.08)',
     elevation: 3,
   },
   legendRow: {

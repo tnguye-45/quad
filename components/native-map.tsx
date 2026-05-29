@@ -70,10 +70,7 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     borderWidth: StyleSheet.hairlineWidth,
     maxWidth: 180,
-    shadowColor: '#0C2340',
-    shadowOpacity: 0.12,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 1 },
+    boxShadow: '0px 1px 4px rgba(12, 35, 64, 0.12)',
     elevation: 2,
   },
   dot: {

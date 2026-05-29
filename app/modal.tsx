@@ -190,6 +190,25 @@ export default function MeModal() {
           )}
         </View>
 
+        <View style={[styles.section, { borderTopColor: c.border }]}>
+          <ThemedText style={[styles.sectionLabel, { color: c.textMuted }]} type="mono">
+            legal
+          </ThemedText>
+          <Pressable
+            onPress={() => router.push('/legal')}
+            style={({ pressed }) => [
+              styles.legalRow,
+              { borderBottomColor: c.border, opacity: pressed ? 0.5 : 1 },
+            ]}>
+            <ThemedText style={[styles.legalRowLabel, { color: c.text }]}>
+              Privacy & terms
+            </ThemedText>
+            <ThemedText style={[styles.legalRowArrow, { color: c.textMuted }]} type="mono">
+              ↗
+            </ThemedText>
+          </Pressable>
+        </View>
+
         <View style={styles.actions}>
           <Pressable
             onPress={() => router.push('/profile-setup')}
@@ -434,4 +453,13 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     fontWeight: '600',
   },
+  legalRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 14,
+    gap: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  legalRowLabel: { flex: 1, fontSize: 15, fontWeight: '600' },
+  legalRowArrow: { fontSize: 14 },
 });

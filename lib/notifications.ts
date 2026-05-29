@@ -78,11 +78,14 @@ export async function registerForPushToken(userId: string): Promise<string | nul
 
 // Notification tap routing. The server should attach a `data` payload like:
 //   { kind: 'message', conversationId: '<uuid>' }
-// and we deep-link to the right screen here.
+// and we deep-link to the right screen here. Comments piggyback on the
+// target's kind (gig/hangout/voice) so the comment-push function and the
+// new-post-push function share the same route table.
 export type PushPayload =
   | { kind: 'message'; conversationId: string }
-  | { kind: 'gig'; gigId: string }
-  | { kind: 'voice'; voiceId: string };
+  | { kind: 'gig'; gigId: string; commentId?: string }
+  | { kind: 'hangout'; hangoutId: string; commentId?: string }
+  | { kind: 'voice'; voiceId: string; commentId?: string };
 
 export function routeForPayload(data: unknown): string | null {
   if (!data || typeof data !== 'object') return null;
@@ -92,9 +95,10 @@ export function routeForPayload(data: unknown): string | null {
       return typeof d.conversationId === 'string' ? `/chat/${d.conversationId}` : null;
     case 'gig':
       return typeof d.gigId === 'string' ? `/gig/${d.gigId}` : null;
+    case 'hangout':
+      return typeof d.hangoutId === 'string' ? `/hangout/${d.hangoutId}` : null;
     case 'voice':
-      // No dedicated voice detail screen yet; land on the Voices tab.
-      return '/(tabs)/voices';
+      return typeof d.voiceId === 'string' ? `/voice/${d.voiceId}` : null;
     default:
       return null;
   }

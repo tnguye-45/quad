@@ -64,6 +64,8 @@ const MAPPING = {
   'eye': 'visibility',
   'eye.slash': 'visibility-off',
   'xmark': 'close',
+  'circle': 'radio-button-unchecked',
+  'checkmark.circle.fill': 'check-circle',
 } as IconMapping;
 
 /**

@@ -954,3 +954,645 @@ drop trigger if exists trg_messages_push on public.messages;
 create trigger trg_messages_push
   after insert on public.messages
   for each row execute function public.notify_new_message();
+-- quad — Phase 2.6: fan-out push notifications on new gigs and hangouts
+--
+-- Mirrors the mechanism choice from 0011 (pg_net + AFTER INSERT row trigger).
+-- One shared trigger function `notify_new_post()` is reused across the two
+-- tables; it forwards a Supabase-Database-Webhook-shaped payload to the
+-- send-new-post-push Edge Function, which dispatches on payload.table.
+--
+-- One-time setup (already required by 0011 — listed again so this migration
+-- is self-documenting):
+--
+--   alter database postgres
+--     set app.settings.new_post_push_url = 'https://<project-ref>.supabase.co/functions/v1/send-new-post-push';
+--   alter database postgres
+--     set app.settings.service_role_key  = '<service-role-jwt>';
+--
+-- Note the URL setting is distinct from app.settings.edge_function_url (which
+-- 0011 uses for send-message-push) so each function can be re-pointed
+-- independently — useful if one is ever moved or paused without touching the
+-- other.
+--
+-- As with 0011 the trigger swallows errors so a failed push cannot block the
+-- underlying INSERT into gigs/hangouts.
+
+create extension if not exists pg_net with schema extensions;
+
+-- ─────────────────────── notify_new_post ───────────────────────
+create or replace function public.notify_new_post()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, extensions
+as $$
+declare
+  v_url   text := current_setting('app.settings.new_post_push_url', true);
+  v_key   text := current_setting('app.settings.service_role_key', true);
+  v_body  jsonb;
+begin
+  if v_url is null or v_url = '' then
+    -- Not configured yet — silently no-op so post creation still works in dev.
+    return new;
+  end if;
+
+  v_body := jsonb_build_object(
+    'type',   'INSERT',
+    'table',  tg_table_name,
+    'schema', tg_table_schema,
+    'record', to_jsonb(new),
+    'old_record', null
+  );
+
+  begin
+    perform net.http_post(
+      url     := v_url,
+      headers := jsonb_build_object(
+        'content-type',   'application/json',
+        'authorization',  'Bearer ' || coalesce(v_key, '')
+      ),
+      body    := v_body
+    );
+  exception when others then
+    raise warning 'notify_new_post(%): net.http_post failed: %', tg_table_name, sqlerrm;
+  end;
+
+  return new;
+end;
+$$;
+
+revoke all on function public.notify_new_post() from public;
+
+-- ─────────────────────── trigger wiring ───────────────────────
+drop trigger if exists trg_gigs_push on public.gigs;
+create trigger trg_gigs_push
+  after insert on public.gigs
+  for each row execute function public.notify_new_post();
+
+drop trigger if exists trg_hangouts_push on public.hangouts;
+create trigger trg_hangouts_push
+  after insert on public.hangouts
+  for each row execute function public.notify_new_post();
+-- quad — Phase 3: user blocks (App Store 1.2 — UGC blocking requirement)
+--
+-- Design choice: we filter blocked content at the RLS layer rather than via
+-- views. Reasoning:
+--   * The app already does direct `from('gigs')`, `from('hangouts')`,
+--     `from('voices')`, `from('messages')` reads (and realtime subscribes to
+--     those exact tables). Introducing views would require either renaming
+--     the realtime sources or maintaining parallel read paths. Both are
+--     bigger changes than just tightening RLS.
+--   * RLS filters are evaluated by the planner with the relevant indexes; the
+--     `NOT EXISTS` subquery on a (blocker_id, blocked_id)-indexed table is cheap.
+--   * Postgres RLS policies for SELECT are combined with OR within a role.
+--     The existing "read for authenticated" policies are `using (true)`, so
+--     adding a stricter policy alongside them would change nothing. We DROP
+--     and RECREATE those policies so the block filter is the only gate.
+--
+-- Block semantics: two-way mute.
+--   * If A blocks B, A no longer sees B's gigs/hangouts/voices/messages.
+--   * Symmetrically, B no longer sees A's content. This prevents harassment
+--     workarounds where the blocked user can still respond.
+--
+-- The `is_blocked` helper is SECURITY DEFINER so it can read user_blocks
+-- regardless of whose row we're querying.
+
+-- ─────────────────────── user_blocks ───────────────────────
+create table public.user_blocks (
+  blocker_id  uuid not null references public.profiles(id) on delete cascade,
+  blocked_id  uuid not null references public.profiles(id) on delete cascade,
+  created_at  timestamptz not null default now(),
+  primary key (blocker_id, blocked_id),
+  check (blocker_id <> blocked_id)
+);
+
+create index user_blocks_blocked_id_idx on public.user_blocks (blocked_id);
+
+alter table public.user_blocks enable row level security;
+
+-- Users only see their own outgoing blocks. They never see who has blocked
+-- them (we use is_blocked() with SECURITY DEFINER for the filter).
+create policy "user_blocks: read own"
+  on public.user_blocks for select
+  to authenticated
+  using (blocker_id = auth.uid());
+
+create policy "user_blocks: insert own"
+  on public.user_blocks for insert
+  to authenticated
+  with check (blocker_id = auth.uid());
+
+create policy "user_blocks: delete own"
+  on public.user_blocks for delete
+  to authenticated
+  using (blocker_id = auth.uid());
+
+-- ─────────────────────── is_blocked helper ───────────────────────
+-- Returns true if either (a) the calling user blocked the target, or
+-- (b) the target blocked the calling user. Either side opting out of the
+-- relationship is enough to hide content from the caller.
+create or replace function public.is_blocked(target_user_id uuid)
+returns boolean
+language sql
+security definer
+stable
+set search_path = public
+as $$
+  select exists (
+    select 1 from public.user_blocks
+    where (blocker_id = auth.uid() and blocked_id = target_user_id)
+       or (blocker_id = target_user_id and blocked_id = auth.uid())
+  );
+$$;
+
+revoke all on function public.is_blocked(uuid) from public;
+grant execute on function public.is_blocked(uuid) to authenticated;
+
+-- ─────────────────────── re-gate feed reads ───────────────────────
+-- gigs: was `using (true)`. Now hides posts whose poster is on either side
+-- of a block with the caller.
+drop policy if exists "gigs: read for authenticated" on public.gigs;
+create policy "gigs: read for authenticated"
+  on public.gigs for select
+  to authenticated
+  using (
+    poster_id = auth.uid()
+    or not public.is_blocked(poster_id)
+  );
+
+drop policy if exists "hangouts: read for authenticated" on public.hangouts;
+create policy "hangouts: read for authenticated"
+  on public.hangouts for select
+  to authenticated
+  using (
+    host_id = auth.uid()
+    or not public.is_blocked(host_id)
+  );
+
+drop policy if exists "voices: read for authenticated" on public.voices;
+create policy "voices: read for authenticated"
+  on public.voices for select
+  to authenticated
+  using (
+    author_id = auth.uid()
+    or not public.is_blocked(author_id)
+  );
+
+-- messages: even within a shared conversation, hide messages sent by users
+-- who are blocked. Important for hangout group chats — a member you block
+-- shouldn't be visible to you even though you're both still in the room.
+drop policy if exists "messages: read if member" on public.messages;
+create policy "messages: read if member"
+  on public.messages for select
+  to authenticated
+  using (
+    public.is_conversation_member(conversation_id)
+    and (sender_id = auth.uid() or not public.is_blocked(sender_id))
+  );
+
+-- hangout_attendees: do NOT filter — the count needs to stay accurate for
+-- capacity checks. The UI just won't render the blocked user's avatar.
+
+-- profiles: do NOT filter — the directory is intentionally public to all
+-- authenticated users (per 0002), and a blocked user's profile being
+-- viewable doesn't enable harassment. The app-level UI should still hide
+-- their content from feeds via the above.
+-- quad — Phase 3: reports v2 (App Store 1.2 — UGC reporting requirement)
+--
+-- The 0001 `reports` table works for the dev seed, but the shape doesn't match
+-- what we actually want to show reviewers:
+--   * target_kind missing `voice` and `profile` (had `user` — renaming for
+--     consistency with how the rest of the app talks about people: it's a
+--     "profile" everywhere else).
+--   * reason was free text; we need a constrained enum for triage.
+--   * no `details` for the optional textarea.
+--   * no `status` so the moderator queue has no notion of "open vs handled".
+--
+-- Since the table only contains throwaway dev data and we're pre-launch (per
+-- the engineer brief), we drop and recreate cleanly. RLS policies from 0002
+-- are reapplied here so nothing depends on cross-migration ordering.
+
+-- Drop the old table; CASCADE the policies in 0002.
+drop table if exists public.reports cascade;
+
+-- ─────────────────────── reason / status enums ───────────────────────
+-- Standalone enums so the queue UI can render dropdowns from pg_enum.
+do $$ begin
+  create type public.report_reason as enum ('spam', 'harassment', 'inappropriate', 'other');
+exception when duplicate_object then null; end $$;
+
+do $$ begin
+  create type public.report_status as enum ('open', 'reviewing', 'actioned', 'dismissed');
+exception when duplicate_object then null; end $$;
+
+do $$ begin
+  create type public.report_target_kind as enum ('gig', 'hangout', 'voice', 'message', 'profile');
+exception when duplicate_object then null; end $$;
+
+-- ─────────────────────── reports ───────────────────────
+create table public.reports (
+  id              uuid primary key default gen_random_uuid(),
+  reporter_id     uuid not null references public.profiles(id) on delete cascade,
+  target_kind     public.report_target_kind not null,
+  target_id       uuid not null,
+  -- Convenience pointer to the offending user, when known. Filled in by the
+  -- client (for `profile` targets it equals target_id; for content targets
+  -- it's the author's id resolved at report time). Kept as `set null` on
+  -- delete so deleting a user doesn't wipe their report history.
+  target_user_id  uuid references public.profiles(id) on delete set null,
+  reason          public.report_reason not null,
+  details         text check (details is null or length(details) <= 1000),
+  status          public.report_status not null default 'open',
+  created_at      timestamptz not null default now()
+);
+
+create index reports_target_idx       on public.reports (target_kind, target_id);
+create index reports_status_idx       on public.reports (status, created_at desc);
+create index reports_reporter_idx     on public.reports (reporter_id);
+
+alter table public.reports enable row level security;
+
+-- Reporter can submit; reporter_id must equal auth.uid() (no impersonation).
+drop policy if exists "reports: insert as self" on public.reports;
+create policy "reports: insert as self"
+  on public.reports for insert
+  to authenticated
+  with check (reporter_id = auth.uid());
+
+-- Reporter can see their own reports (so the UI can show "you've already
+-- reported this"). No one else can read reports via the client — the
+-- moderator queue uses the service role.
+drop policy if exists "reports: read own" on public.reports;
+create policy "reports: read own"
+  on public.reports for select
+  to authenticated
+  using (reporter_id = auth.uid());
+
+-- No update or delete from the client.
+-- quad — Phase 3: per-user notification preferences
+--
+-- The push fan-out functions (`send-message-push`, `send-new-post-push`) read
+-- this table to decide whether to skip a recipient. Missing-row semantics:
+-- defaults are opt-in for messages/gigs/hangouts and opt-out for voices.
+-- Voices is opt-out because the feed is high-volume — pushing on every new
+-- anonymous opinion would melt the device.
+--
+-- A row is upserted from the client whenever the user toggles a preference;
+-- new users get the defaults applied implicitly by the COALESCE in the
+-- function's lookup.
+
+create table public.notification_prefs (
+  user_id       uuid primary key references public.profiles(id) on delete cascade,
+  messages      boolean not null default true,
+  new_gigs      boolean not null default true,
+  new_hangouts  boolean not null default true,
+  new_voices    boolean not null default false,
+  updated_at    timestamptz not null default now()
+);
+
+alter table public.notification_prefs enable row level security;
+
+drop policy if exists "notification_prefs: read own" on public.notification_prefs;
+create policy "notification_prefs: read own"
+  on public.notification_prefs for select
+  to authenticated
+  using (user_id = auth.uid());
+
+drop policy if exists "notification_prefs: insert own" on public.notification_prefs;
+create policy "notification_prefs: insert own"
+  on public.notification_prefs for insert
+  to authenticated
+  with check (user_id = auth.uid());
+
+drop policy if exists "notification_prefs: update own" on public.notification_prefs;
+create policy "notification_prefs: update own"
+  on public.notification_prefs for update
+  to authenticated
+  using (user_id = auth.uid())
+  with check (user_id = auth.uid());
+
+drop policy if exists "notification_prefs: delete own" on public.notification_prefs;
+create policy "notification_prefs: delete own"
+  on public.notification_prefs for delete
+  to authenticated
+  using (user_id = auth.uid());
+-- quad — Phase 3: image attachments on messages
+--
+-- A message can now carry an image instead of (or in addition to) text. The
+-- existing `body NOT NULL` + `length(body) > 0` constraint on messages
+-- prevents image-only sends, so we relax it to allow either:
+--   * non-empty body, or
+--   * non-null image_url
+-- The new image_url column is a public Supabase Storage URL pointing at the
+-- `message-images` bucket (created in 0017). image_width / image_height are
+-- captured at upload time so the chat UI can size the bubble correctly
+-- before the image finishes downloading (no layout jump).
+
+alter table public.messages
+  add column if not exists image_url    text,
+  add column if not exists image_width  integer,
+  add column if not exists image_height integer;
+
+-- Relax the body constraint. The original check forbids empty body; we now
+-- allow empty body iff image_url is set. Drop the old constraint by name if
+-- it exists (Postgres auto-names it messages_body_check), then add ours.
+do $$
+declare
+  v_name text;
+begin
+  select conname into v_name
+    from pg_constraint
+   where conrelid = 'public.messages'::regclass
+     and contype = 'c'
+     and pg_get_constraintdef(oid) ilike '%length(body)%';
+  if v_name is not null then
+    execute format('alter table public.messages drop constraint %I', v_name);
+  end if;
+end $$;
+
+-- Also drop the NOT NULL on body so image-only messages don't trip it.
+alter table public.messages alter column body drop not null;
+
+alter table public.messages
+  add constraint messages_body_or_image_check check (
+    (body is not null and length(body) > 0 and length(body) <= 4000)
+    or image_url is not null
+  );
+
+-- Realtime + RLS already cover the new columns transparently; no policy edits
+-- needed because reads gate on conversation membership, not specific columns.
+-- quad — Phase 3: message-images storage bucket
+--
+-- Public bucket so any conversation member can render an inlined image
+-- without needing a signed URL roundtrip. Writes / deletes are owner-only,
+-- enforced by checking the first path segment against `auth.uid()` — same
+-- pattern as the `avatars` bucket (see 0010_avatars_bucket.sql).
+--
+-- Path convention: `{userId}/{messageId-or-uuid}.jpg` — one image per row.
+-- We don't bother with a server-side reference count: messages are immutable
+-- in v1, so the upload path mirrors the message lifecycle 1:1.
+
+insert into storage.buckets (id, name, public)
+values ('message-images', 'message-images', true)
+on conflict (id) do update set public = true;
+
+drop policy if exists "message-images: public read" on storage.objects;
+create policy "message-images: public read"
+  on storage.objects for select
+  to public
+  using (bucket_id = 'message-images');
+
+drop policy if exists "message-images: owner insert" on storage.objects;
+create policy "message-images: owner insert"
+  on storage.objects for insert
+  to authenticated
+  with check (
+    bucket_id = 'message-images'
+    and (storage.foldername(name))[1] = auth.uid()::text
+  );
+
+drop policy if exists "message-images: owner update" on storage.objects;
+create policy "message-images: owner update"
+  on storage.objects for update
+  to authenticated
+  using (
+    bucket_id = 'message-images'
+    and (storage.foldername(name))[1] = auth.uid()::text
+  )
+  with check (
+    bucket_id = 'message-images'
+    and (storage.foldername(name))[1] = auth.uid()::text
+  );
+
+drop policy if exists "message-images: owner delete" on storage.objects;
+create policy "message-images: owner delete"
+  on storage.objects for delete
+  to authenticated
+  using (
+    bucket_id = 'message-images'
+    and (storage.foldername(name))[1] = auth.uid()::text
+  );
+-- quad — Phase 3: unread message counts + conversation_members realtime
+--
+-- Two things bundled here because both serve the DM-state UX:
+--
+--   1) Add conversation_members to the supabase_realtime publication so
+--      UPDATE events on last_read_at fan out to subscribed clients. This is
+--      what powers the live "Read" indicator in chat (see lib/messaging.ts
+--      thread channel UPDATE handler).
+--
+--   2) Expose `unread_counts_for_user(p_user_id uuid)` as a SECURITY DEFINER
+--      function that returns one row per conversation the user is a member
+--      of with the count of messages sent *after* that user's last_read_at
+--      by someone else. The Messages tab + tab-bar badge call this and
+--      total it across rows to decide whether to render an accent dot.
+--
+-- We expose this as a function (not a view) for two reasons:
+--   - It depends on `auth.uid()` indirectly (we pass it explicitly), so a
+--     view would either need to be defined as security_invoker (slower with
+--     RLS recursion on conversation_members) or hit a wall against
+--     anonymous role access.
+--   - Functions can be granted to authenticated only, which keeps the
+--     surface tighter than a public view.
+
+-- ─────────────────────── realtime publication ───────────────────────
+do $$ begin
+  alter publication supabase_realtime add table public.conversation_members;
+exception when duplicate_object then null; end $$;
+
+-- ─────────────────────── unread_counts_for_user ───────────────────────
+create or replace function public.unread_counts_for_user(p_user_id uuid)
+returns table (conversation_id uuid, unread int)
+language sql
+security definer
+stable
+set search_path = public
+as $$
+  select
+    cm.conversation_id,
+    count(m.*)::int as unread
+  from public.conversation_members cm
+  left join public.messages m
+    on m.conversation_id = cm.conversation_id
+   and m.sent_at > cm.last_read_at
+   and m.sender_id <> cm.user_id
+  where cm.user_id = p_user_id
+  group by cm.conversation_id;
+$$;
+
+revoke all on function public.unread_counts_for_user(uuid) from public;
+grant execute on function public.unread_counts_for_user(uuid) to authenticated;
+-- quad — Phase 3: comments + voice push fan-out + realtime
+--
+-- Adds a single `comments` table that attaches to gigs / hangouts / voices
+-- via a (target_type, target_id) discriminator, instead of three separate
+-- tables. Trades a little type-system rigor for one query path, one realtime
+-- channel pattern, and one push trigger.
+--
+-- Also wires the voices table into the existing notify_new_post() trigger
+-- (0012 only covered gigs and hangouts) and adds a notify_new_comment()
+-- trigger that pings the target's owner.
+--
+-- One-time setup the trigger needs (same DB GUC mechanism as 0011 / 0012):
+--
+--   alter database postgres
+--     set app.settings.new_comment_push_url
+--       = 'https://<project-ref>.supabase.co/functions/v1/send-new-comment-push';
+--
+-- (service_role_key is already set from 0011.)
+
+create extension if not exists pg_net with schema extensions;
+
+-- ─────────────────────── comments table ───────────────────────
+create table public.comments (
+  id           uuid primary key default gen_random_uuid(),
+  target_type  text not null check (target_type in ('gig', 'hangout', 'voice')),
+  target_id    uuid not null,
+  author_id    uuid not null references public.profiles(id) on delete cascade,
+  anonymous    boolean not null default false,
+  body         text not null check (length(body) between 1 and 500),
+  created_at   timestamptz not null default now()
+);
+
+-- Hot path: load all comments for one target in chronological order.
+create index comments_target_idx on public.comments (target_type, target_id, created_at);
+-- Author history (for "my posts" expansion + soft-moderation lookups).
+create index comments_author_idx on public.comments (author_id);
+
+-- ─────────────────────── comment_count caches ───────────────────────
+-- Mirror the vote_score pattern from 0005 — denormalized counter on the
+-- parent row so feeds don't have to aggregate on every fetch.
+alter table public.gigs     add column if not exists comment_count integer not null default 0;
+alter table public.hangouts add column if not exists comment_count integer not null default 0;
+alter table public.voices   add column if not exists comment_count integer not null default 0;
+
+create or replace function public.recompute_comment_count(
+  p_target_type text,
+  p_target_id   uuid
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_count int;
+begin
+  select count(*)::int into v_count
+    from public.comments
+   where target_type = p_target_type and target_id = p_target_id;
+  if p_target_type = 'gig' then
+    update public.gigs     set comment_count = v_count where id = p_target_id;
+  elsif p_target_type = 'hangout' then
+    update public.hangouts set comment_count = v_count where id = p_target_id;
+  elsif p_target_type = 'voice' then
+    update public.voices   set comment_count = v_count where id = p_target_id;
+  end if;
+end;
+$$;
+
+create or replace function public.comments_after_change()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if tg_op = 'DELETE' then
+    perform public.recompute_comment_count(old.target_type, old.target_id);
+    return old;
+  end if;
+  perform public.recompute_comment_count(new.target_type, new.target_id);
+  return new;
+end;
+$$;
+
+drop trigger if exists comments_sync on public.comments;
+create trigger comments_sync
+  after insert or delete on public.comments
+  for each row execute function public.comments_after_change();
+
+-- ─────────────────────── RLS ───────────────────────
+alter table public.comments enable row level security;
+
+-- Anyone authenticated can read the thread. Client is responsible for hiding
+-- author_id when anonymous = true — column is exposed so authors see history.
+create policy "comments: read for authenticated"
+  on public.comments for select
+  to authenticated
+  using (true);
+
+create policy "comments: insert own"
+  on public.comments for insert
+  to authenticated
+  with check (author_id = auth.uid());
+
+-- Authors can delete their own comments. No updates — immutable like voices.
+create policy "comments: delete own"
+  on public.comments for delete
+  to authenticated
+  using (author_id = auth.uid());
+
+-- ─────────────────────── voice push fan-out ───────────────────────
+-- 0012 already defined notify_new_post() and wired it to gigs + hangouts.
+-- Add voices to the same fan-out so a new anonymous voice pings the campus.
+drop trigger if exists trg_voices_push on public.voices;
+create trigger trg_voices_push
+  after insert on public.voices
+  for each row execute function public.notify_new_post();
+
+-- ─────────────────────── comment push fan-out ───────────────────────
+-- Ping the owner of the parent post (and not the commenter themselves) when
+-- a new comment lands. The Edge Function resolves the owner; this trigger
+-- just forwards the row payload.
+create or replace function public.notify_new_comment()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, extensions
+as $$
+declare
+  v_url   text := current_setting('app.settings.new_comment_push_url', true);
+  v_key   text := current_setting('app.settings.service_role_key', true);
+  v_body  jsonb;
+begin
+  if v_url is null or v_url = '' then
+    return new;
+  end if;
+
+  v_body := jsonb_build_object(
+    'type',   'INSERT',
+    'table',  'comments',
+    'schema', 'public',
+    'record', to_jsonb(new),
+    'old_record', null
+  );
+
+  begin
+    perform net.http_post(
+      url     := v_url,
+      headers := jsonb_build_object(
+        'content-type',   'application/json',
+        'authorization',  'Bearer ' || coalesce(v_key, '')
+      ),
+      body    := v_body
+    );
+  exception when others then
+    raise warning 'notify_new_comment: net.http_post failed: %', sqlerrm;
+  end;
+
+  return new;
+end;
+$$;
+
+revoke all on function public.notify_new_comment() from public;
+
+drop trigger if exists trg_comments_push on public.comments;
+create trigger trg_comments_push
+  after insert on public.comments
+  for each row execute function public.notify_new_comment();
+
+-- ─────────────────────── realtime publication ───────────────────────
+do $$ begin
+  alter publication supabase_realtime add table public.comments;
+exception when duplicate_object then null; end $$;

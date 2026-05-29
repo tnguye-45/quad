@@ -53,6 +53,7 @@ export type Gig = {
   posterName: string | null;
   posterInitials: string | null;
   posterAvatarUrl: string | null;
+  comments: number;
 };
 
 export type Hangout = {
@@ -69,6 +70,7 @@ export type Hangout = {
   hostName: string | null;
   hostInitials: string | null;
   hostAvatarUrl: string | null;
+  comments: number;
 };
 
 export type Voice = {
@@ -93,20 +95,20 @@ const MIN = 60_000;
 const HR = 60 * MIN;
 
 const SEED_GIGS: Gig[] = [
-  { id: 'seed-g-1', ownerId: SEED_OWNER, anonymous: false, title: 'Help moving a couch up 3 flights', payout: '$40', category: 'Moving', where: 'Dillon Hall · 0.4 mi', postedAt: NOW - 12 * MIN, postedAgo: '12 min ago', posterName: 'Marcus K.', posterInitials: 'MK', posterAvatarUrl: null },
-  { id: 'seed-g-2', ownerId: SEED_OWNER, anonymous: false, title: 'Need a ride to South Bend airport Sat 6am', payout: '$15', category: 'Rideshare', where: 'SBN · 4 mi', postedAt: NOW - HR, postedAgo: '1h ago', posterName: 'Priya S.', posterInitials: 'PS', posterAvatarUrl: null },
-  { id: 'seed-g-3', ownerId: SEED_OWNER, anonymous: false, title: 'MATH 10560 tutor for midterm prep', payout: '$30/hr', category: 'Tutoring', where: 'Hesburgh Library', postedAt: NOW - 2 * HR, postedAgo: '2h ago', posterName: 'Jordan L.', posterInitials: 'JL', posterAvatarUrl: null },
-  { id: 'seed-g-4', ownerId: SEED_OWNER, anonymous: false, title: 'Walk my dog this weekend', payout: '$15', category: 'Pets', where: 'Sorin College · 0.2 mi', postedAt: NOW - 3 * HR, postedAgo: '3h ago', posterName: 'Sam R.', posterInitials: 'SR', posterAvatarUrl: null },
-  { id: 'seed-g-5', ownerId: SEED_OWNER, anonymous: false, title: 'Photographer for senior portraits at the Dome', payout: '$80', category: 'Creative', where: 'Main Building · 0.6 mi', postedAt: NOW - 5 * HR, postedAgo: '5h ago', posterName: 'Aisha M.', posterInitials: 'AM', posterAvatarUrl: null },
-  { id: 'seed-g-6', ownerId: SEED_OWNER, anonymous: false, title: 'Pick up Amazon package & drop it at my dorm', payout: '$8', category: 'Errands', where: 'LaFortune · 0.3 mi', postedAt: NOW - 24 * HR, postedAgo: 'yesterday', posterName: 'Tyler J.', posterInitials: 'TJ', posterAvatarUrl: null },
+  { id: 'seed-g-1', ownerId: SEED_OWNER, anonymous: false, title: 'Help moving a couch up 3 flights', payout: '$40', category: 'Moving', where: 'Dillon Hall · 0.4 mi', postedAt: NOW - 12 * MIN, postedAgo: '12 min ago', posterName: 'Marcus K.', posterInitials: 'MK', posterAvatarUrl: null, comments: 0 },
+  { id: 'seed-g-2', ownerId: SEED_OWNER, anonymous: false, title: 'Need a ride to South Bend airport Sat 6am', payout: '$15', category: 'Rideshare', where: 'SBN · 4 mi', postedAt: NOW - HR, postedAgo: '1h ago', posterName: 'Priya S.', posterInitials: 'PS', posterAvatarUrl: null, comments: 0 },
+  { id: 'seed-g-3', ownerId: SEED_OWNER, anonymous: false, title: 'MATH 10560 tutor for midterm prep', payout: '$30/hr', category: 'Tutoring', where: 'Hesburgh Library', postedAt: NOW - 2 * HR, postedAgo: '2h ago', posterName: 'Jordan L.', posterInitials: 'JL', posterAvatarUrl: null, comments: 0 },
+  { id: 'seed-g-4', ownerId: SEED_OWNER, anonymous: false, title: 'Walk my dog this weekend', payout: '$15', category: 'Pets', where: 'Sorin College · 0.2 mi', postedAt: NOW - 3 * HR, postedAgo: '3h ago', posterName: 'Sam R.', posterInitials: 'SR', posterAvatarUrl: null, comments: 0 },
+  { id: 'seed-g-5', ownerId: SEED_OWNER, anonymous: false, title: 'Photographer for senior portraits at the Dome', payout: '$80', category: 'Creative', where: 'Main Building · 0.6 mi', postedAt: NOW - 5 * HR, postedAgo: '5h ago', posterName: 'Aisha M.', posterInitials: 'AM', posterAvatarUrl: null, comments: 0 },
+  { id: 'seed-g-6', ownerId: SEED_OWNER, anonymous: false, title: 'Pick up Amazon package & drop it at my dorm', payout: '$8', category: 'Errands', where: 'LaFortune · 0.3 mi', postedAt: NOW - 24 * HR, postedAgo: 'yesterday', posterName: 'Tyler J.', posterInitials: 'TJ', posterAvatarUrl: null, comments: 0 },
 ];
 
 const SEED_HANGOUTS: Hangout[] = [
-  { id: 'seed-h-1', ownerId: SEED_OWNER, anonymous: false, title: 'CSE 20110 midterm cram session', when: 'Tonight · 8:00 PM', where: 'Hesburgh Library, 2nd floor', going: 4, vibe: 'Study', postedAt: NOW - 2 * HR, hostName: 'Jordan L.', hostInitials: 'JL', hostAvatarUrl: null },
-  { id: 'seed-h-2', ownerId: SEED_OWNER, anonymous: false, title: 'Pickup basketball — all skill levels', when: 'Sat · 3:00 PM', where: 'Rolfs Sports Recreation Center', going: 8, vibe: 'Sports', postedAt: NOW - 5 * HR, hostName: 'Tyler J.', hostInitials: 'TJ', hostAvatarUrl: null },
-  { id: 'seed-h-3', ownerId: SEED_OWNER, anonymous: false, title: 'South Dining Hall dinner', when: 'Tonight · 6:30 PM', where: 'South Dining Hall', going: 3, vibe: 'Food', postedAt: NOW - 4 * HR, hostName: 'Aisha M.', hostInitials: 'AM', hostAvatarUrl: null },
-  { id: 'seed-h-4', ownerId: SEED_OWNER, anonymous: false, title: 'Coffee run @ Hagerty', when: 'Tomorrow · 4:00 PM', where: 'Hagerty Family Café, DPAC', going: 2, vibe: 'Social', postedAt: NOW - 7 * HR, hostName: 'Sam R.', hostInitials: 'SR', hostAvatarUrl: null },
-  { id: 'seed-h-5', ownerId: SEED_OWNER, anonymous: false, title: 'Sunset run around the lakes', when: 'Sun · 6:15 PM', where: "St. Joseph's Lake trail", going: 5, vibe: 'Sports', postedAt: NOW - 9 * HR, hostName: 'Priya S.', hostInitials: 'PS', hostAvatarUrl: null },
+  { id: 'seed-h-1', ownerId: SEED_OWNER, anonymous: false, title: 'CSE 20110 midterm cram session', when: 'Tonight · 8:00 PM', where: 'Hesburgh Library, 2nd floor', going: 4, vibe: 'Study', postedAt: NOW - 2 * HR, hostName: 'Jordan L.', hostInitials: 'JL', hostAvatarUrl: null, comments: 0 },
+  { id: 'seed-h-2', ownerId: SEED_OWNER, anonymous: false, title: 'Pickup basketball — all skill levels', when: 'Sat · 3:00 PM', where: 'Rolfs Sports Recreation Center', going: 8, vibe: 'Sports', postedAt: NOW - 5 * HR, hostName: 'Tyler J.', hostInitials: 'TJ', hostAvatarUrl: null, comments: 0 },
+  { id: 'seed-h-3', ownerId: SEED_OWNER, anonymous: false, title: 'South Dining Hall dinner', when: 'Tonight · 6:30 PM', where: 'South Dining Hall', going: 3, vibe: 'Food', postedAt: NOW - 4 * HR, hostName: 'Aisha M.', hostInitials: 'AM', hostAvatarUrl: null, comments: 0 },
+  { id: 'seed-h-4', ownerId: SEED_OWNER, anonymous: false, title: 'Coffee run @ Hagerty', when: 'Tomorrow · 4:00 PM', where: 'Hagerty Family Café, DPAC', going: 2, vibe: 'Social', postedAt: NOW - 7 * HR, hostName: 'Sam R.', hostInitials: 'SR', hostAvatarUrl: null, comments: 0 },
+  { id: 'seed-h-5', ownerId: SEED_OWNER, anonymous: false, title: 'Sunset run around the lakes', when: 'Sun · 6:15 PM', where: "St. Joseph's Lake trail", going: 5, vibe: 'Sports', postedAt: NOW - 9 * HR, hostName: 'Priya S.', hostInitials: 'PS', hostAvatarUrl: null, comments: 0 },
 ];
 
 const SEED_VOICES: Voice[] = [
@@ -220,6 +222,7 @@ type DbGigRow = {
   location_label: string | null;
   posted_at: string;
   anonymous: boolean;
+  comment_count?: number | null;
   poster?: DbProfileEmbed;
 };
 
@@ -238,6 +241,7 @@ function gigFromDb(row: DbGigRow): Gig {
     posterName: row.anonymous ? null : (row.poster?.display_name ?? null),
     posterInitials: row.anonymous ? null : (row.poster?.initials ?? null),
     posterAvatarUrl: row.anonymous ? null : (row.poster?.avatar_url ?? null),
+    comments: row.comment_count ?? 0,
   };
 }
 
@@ -251,6 +255,7 @@ type DbHangoutRow = {
   description: string | null;
   anonymous: boolean;
   created_at: string;
+  comment_count?: number | null;
   host?: DbProfileEmbed;
   hangout_attendees?: { count: number }[];
 };
@@ -274,6 +279,7 @@ function hangoutFromDb(row: DbHangoutRow): Hangout {
     hostName: row.anonymous ? null : (row.host?.display_name ?? null),
     hostInitials: row.anonymous ? null : (row.host?.initials ?? null),
     hostAvatarUrl: row.anonymous ? null : (row.host?.avatar_url ?? null),
+    comments: row.comment_count ?? 0,
   };
 }
 
@@ -285,6 +291,7 @@ type DbVoiceRow = {
   topic: VoiceTopic;
   posted_at: string;
   vote_score: number;
+  comment_count?: number | null;
   author?: DbProfileEmbed;
 };
 
@@ -296,7 +303,7 @@ function voiceFromDb(row: DbVoiceRow): Voice {
     body: row.body,
     topic: row.topic,
     votes: row.vote_score,
-    comments: 0,
+    comments: row.comment_count ?? 0,
     postedAt: new Date(row.posted_at).getTime(),
     postedAgo: timeAgo(row.posted_at),
     posterName: row.anonymous ? null : (row.author?.display_name ?? null),
@@ -538,9 +545,37 @@ export function PostsProvider({ children }: { children: ReactNode }) {
         'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'voices' },
         (payload) => {
-          const row = payload.new as { id: string; vote_score: number };
+          const row = payload.new as { id: string; vote_score: number; comment_count: number };
           setVoices((cur) =>
-            cur.map((v) => (v.id === row.id ? { ...v, votes: row.vote_score } : v)),
+            cur.map((v) =>
+              v.id === row.id
+                ? { ...v, votes: row.vote_score, comments: row.comment_count ?? v.comments }
+                : v,
+            ),
+          );
+        },
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'gigs' },
+        (payload) => {
+          const row = payload.new as { id: string; comment_count: number };
+          setGigs((cur) =>
+            cur.map((g) =>
+              g.id === row.id ? { ...g, comments: row.comment_count ?? g.comments } : g,
+            ),
+          );
+        },
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'hangouts' },
+        (payload) => {
+          const row = payload.new as { id: string; comment_count: number };
+          setHangouts((cur) =>
+            cur.map((h) =>
+              h.id === row.id ? { ...h, comments: row.comment_count ?? h.comments } : h,
+            ),
           );
         },
       )
@@ -569,6 +604,7 @@ export function PostsProvider({ children }: { children: ReactNode }) {
         posterName: input.anonymous ? null : input.posterName,
         posterInitials: input.anonymous ? null : input.posterInitials,
         posterAvatarUrl: input.anonymous ? null : input.posterAvatarUrl,
+        comments: 0,
       };
       setGigs((cur) => [optimistic, ...cur]);
       return;
@@ -614,6 +650,7 @@ export function PostsProvider({ children }: { children: ReactNode }) {
         hostName: input.anonymous ? null : input.hostName,
         hostInitials: input.anonymous ? null : input.hostInitials,
         hostAvatarUrl: input.anonymous ? null : input.hostAvatarUrl,
+        comments: 0,
       };
       setHangouts((cur) => [optimistic, ...cur]);
       return;

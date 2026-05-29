@@ -47,7 +47,10 @@ function RootStack() {
       first === 'chat' ||
       first === 'modal' ||
       first === 'settings' ||
-      first === 'report';
+      first === 'report' ||
+      first === 'gig' ||
+      first === 'hangout' ||
+      first === 'voice';
     const inLegal = first === 'legal'; // legal screens are accessible signed-out too
     const inSplashOrWelcome = first === undefined || first === 'splash' || first === 'welcome';
     void inLegal;
@@ -124,6 +127,14 @@ function RootStack() {
           name="gig/[id]"
           options={{ presentation: 'modal', title: 'Gig' }}
         />
+        <Stack.Screen
+          name="hangout/[id]"
+          options={{ presentation: 'modal', title: 'Hangout' }}
+        />
+        <Stack.Screen
+          name="voice/[id]"
+          options={{ presentation: 'modal', title: 'Voice' }}
+        />
         <Stack.Screen name="settings/account" options={{ headerShown: false }} />
         <Stack.Screen name="settings/blocked" options={{ headerShown: false }} />
         <Stack.Screen name="settings/notifications" options={{ headerShown: false }} />
@@ -133,6 +144,10 @@ function RootStack() {
         />
         <Stack.Screen name="legal/privacy" options={{ headerShown: false }} />
         <Stack.Screen name="legal/tos" options={{ headerShown: false }} />
+        <Stack.Screen
+          name="legal"
+          options={{ presentation: 'modal', title: 'Legal' }}
+        />
       </Stack>
       <StatusBar style="auto" />
     </ThemeProvider>

@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { Avatar } from '@/components/avatar';
+import { CommentThread } from '@/components/comment-thread';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { IconSymbol } from '@/components/ui/icon-symbol';
@@ -208,6 +209,10 @@ export default function GigDetailScreen() {
             </ThemedText>
           </Pressable>
         </View>
+
+        <View style={styles.commentsHolder}>
+          <CommentThread targetType="gig" targetId={gig.id} />
+        </View>
       </ScrollView>
     </ThemedView>
   );
@@ -345,4 +350,8 @@ const styles = StyleSheet.create({
     letterSpacing: -0.4,
   },
   emptyBody: { fontSize: 14, textAlign: 'center', lineHeight: 20 },
+  commentsHolder: {
+    marginTop: 8,
+    marginHorizontal: -24,
+  },
 });

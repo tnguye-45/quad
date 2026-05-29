@@ -108,6 +108,7 @@ export default function SignUpScreen() {
                 {busy ? 'Creating account…' : 'Create account'}
               </ThemedText>
             </Pressable>
+
           </View>
         </ScrollView>
 

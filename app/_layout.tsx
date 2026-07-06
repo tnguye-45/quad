@@ -13,6 +13,7 @@ import {
   subscribeToNotificationTaps,
 } from '@/lib/notifications';
 import { PostsProvider } from '@/lib/posts-store';
+import { DevConversationsProvider } from '@/lib/dev-conversations';
 
 setupNotificationHandler();
 
@@ -24,7 +25,9 @@ export default function RootLayout() {
   return (
     <AuthProvider>
       <PostsProvider>
-        <RootStack />
+        <DevConversationsProvider>
+          <RootStack />
+        </DevConversationsProvider>
       </PostsProvider>
     </AuthProvider>
   );

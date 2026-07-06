@@ -33,6 +33,7 @@ import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useAuth } from '@/lib/auth-context';
+import { useDevConversations, type DevConversation } from '@/lib/dev-conversations';
 import {
   useThread,
   type MemberReadState,
@@ -40,91 +41,6 @@ import {
   type TypingState,
 } from '@/lib/messaging';
 import { uploadMessageImage } from '@/lib/message-images';
-
-type Msg = { from: 'me' | 'them'; text: string; time?: string };
-
-type MockConvo = {
-  name: string;
-  initials: string;
-  context: string;
-  online: boolean;
-  messages: Msg[];
-};
-
-const MOCK_CONVOS: Record<string, MockConvo> = {
-  marcus: {
-    name: 'Marcus K.',
-    initials: 'MK',
-    context: 'Re: Help moving a couch · $40',
-    online: true,
-    messages: [
-      { from: 'them', text: 'hey! is the couch still up for moving this afternoon?', time: '2:14 PM' },
-      { from: 'me', text: 'yeah! how does 3pm work?' },
-      { from: 'them', text: "perfect. it's a 2-seater leather, going from Dillon Hall up to Sorin 4th floor" },
-      { from: 'me', text: "cool. I'll bring my friend Tyler so it's faster, $40 split between us is fine" },
-      { from: 'them', text: 'works for me 🙏' },
-      { from: 'them', text: 'Sounds good! See you at 3', time: '2:32 PM' },
-    ],
-  },
-  priya: {
-    name: 'Priya S.',
-    initials: 'PS',
-    context: 'Re: SBN airport ride · $15',
-    online: false,
-    messages: [
-      { from: 'them', text: 'are you still doing the SBN ride saturday?', time: '1:05 PM' },
-      { from: 'me', text: 'yes! 6am pickup at the front circle?' },
-      { from: 'them', text: 'I can grab you from Dillon', time: '1:42 PM' },
-    ],
-  },
-  jordan: {
-    name: 'Jordan L.',
-    initials: 'JL',
-    context: 'Re: MATH 10560 tutor · $30/hr',
-    online: true,
-    messages: [
-      { from: 'me', text: 'hey, saw your tutoring post — could you help me prep for the midterm?' },
-      { from: 'them', text: "for sure. what's tripping you up?", time: '11:02 AM' },
-      { from: 'me', text: 'mostly series convergence and integration by parts' },
-      { from: 'them', text: 'Want to meet at Hesburgh tonight?', time: '11:15 AM' },
-    ],
-  },
-  'cse-cram': {
-    name: 'CSE 20110 cram',
-    initials: 'CS',
-    context: 'Group · 4 people · Tonight 8pm',
-    online: true,
-    messages: [
-      { from: 'them', text: 'who needs to review proof by induction lol' },
-      { from: 'me', text: 'me 😅' },
-      { from: 'them', text: 'same' },
-      { from: 'them', text: 'Bringing snacks 🥨', time: '10:48 AM' },
-    ],
-  },
-  aisha: {
-    name: 'Aisha M.',
-    initials: 'AM',
-    context: 'Re: Senior portraits · $80',
-    online: false,
-    messages: [
-      { from: 'them', text: 'hey! got time to chat about your shoot?' },
-      { from: 'me', text: 'yes — thinking late afternoon for golden hour at the Dome' },
-      { from: 'them', text: 'perfect time. I can do this Friday or Sunday' },
-      { from: 'them', text: 'Sent you a few sample shots 📸', time: 'Yesterday' },
-    ],
-  },
-  sam: {
-    name: 'Sam R.',
-    initials: 'SR',
-    context: 'Re: Dog walk · $15',
-    online: false,
-    messages: [
-      { from: 'me', text: 'all done — Bagel had a great time at the lakes!' },
-      { from: 'them', text: 'omg the photo is so cute, ty' },
-      { from: 'them', text: 'Thanks again — Bagel loved it', time: '2 days ago' },
-    ],
-  },
-};
 
 function formatTime(d: Date): string {
   let h = d.getHours();
@@ -166,14 +82,14 @@ export default function ChatScreen() {
   const c = Colors[useColorScheme() ?? 'light'];
   const { session, isDev } = useAuth();
   const realSession = !!session && !isDev;
-  const mock = id ? MOCK_CONVOS[id] : undefined;
-  const useReal = realSession && !mock;
+  const { getConversation } = useDevConversations();
 
-  if (useReal) {
+  if (realSession) {
     return <RealChat conversationId={id ?? ''} colors={c} userId={session!.user.id} />;
   }
-  if (mock) {
-    return <MockChat convo={mock} colors={c} />;
+  const convo = id ? getConversation(id) : undefined;
+  if (convo) {
+    return <DevChat conversationId={convo.id} colors={c} />;
   }
   return <EmptyChat colors={c} />;
 }
@@ -721,15 +637,24 @@ function ImageViewerModal({
   );
 }
 
-function MockChat({ convo, colors: c }: { convo: MockConvo; colors: (typeof Colors)['light'] }) {
+function DevChat({
+  conversationId,
+  colors: c,
+}: {
+  conversationId: string;
+  colors: (typeof Colors)['light'];
+}) {
+  const { getConversation, sendMessage, markRead } = useDevConversations();
+  const convo = getConversation(conversationId) as DevConversation | undefined;
   const [draft, setDraft] = useState('');
-  const [messages, setMessages] = useState<Msg[]>(convo.messages);
   const scrollRef = useRef<ScrollView | null>(null);
+  const messages = convo?.messages ?? [];
+  const isGroup = convo?.kind === 'hangout';
 
+  // Clear the unread dot once the thread is open.
   useEffect(() => {
-    setMessages(convo.messages);
-    setDraft('');
-  }, [convo]);
+    markRead(conversationId);
+  }, [conversationId, markRead]);
 
   useEffect(() => {
     const t = setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 50);
@@ -739,10 +664,11 @@ function MockChat({ convo, colors: c }: { convo: MockConvo; colors: (typeof Colo
   function handleSend() {
     const text = draft.trim();
     if (!text) return;
-    const newMsg: Msg = { from: 'me', text, time: formatTime(new Date()) };
-    setMessages((cur) => [...cur, newMsg]);
+    sendMessage(conversationId, text);
     setDraft('');
   }
+
+  if (!convo) return <EmptyChat colors={c} />;
 
   return (
     <KeyboardAvoidingView
@@ -763,13 +689,25 @@ function MockChat({ convo, colors: c }: { convo: MockConvo; colors: (typeof Colo
           showsVerticalScrollIndicator={false}>
           {messages.map((m, i) => {
             const isMine = m.from === 'me';
+            const prev = messages[i - 1];
+            const showStamp = !prev || m.sentAt - prev.sentAt > TIME_CLUSTER_GAP_MS;
+            const showSender =
+              isGroup && !isMine && !!m.senderName &&
+              (!prev || prev.senderName !== m.senderName || prev.from === 'me');
             return (
-              <View key={i}>
-                {m.time ? (
+              <View key={m.id ?? i}>
+                {showStamp ? (
                   <ThemedText
                     style={[styles.clusterStamp, { color: c.textMuted }]}
                     type="mono">
-                    {m.time}
+                    {formatStamp(m.sentAt)}
+                  </ThemedText>
+                ) : null}
+                {showSender ? (
+                  <ThemedText
+                    style={[styles.groupSender, { color: c.textMuted }]}
+                    type="mono">
+                    {m.senderName}
                   </ThemedText>
                 ) : null}
                 <View style={[styles.bubbleRow, isMine && styles.bubbleRowRight]}>
@@ -934,6 +872,13 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     paddingTop: 16,
     paddingBottom: 6,
+  },
+  groupSender: {
+    fontSize: 10,
+    letterSpacing: 0.3,
+    textTransform: 'lowercase',
+    paddingLeft: 4,
+    paddingBottom: 2,
   },
   bubbleRow: {
     flexDirection: 'row',

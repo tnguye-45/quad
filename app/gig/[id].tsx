@@ -10,6 +10,7 @@ import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useAuth } from '@/lib/auth-context';
+import { useDevConversations } from '@/lib/dev-conversations';
 import { findOrCreateGigConversation } from '@/lib/messaging';
 import { usePosts, type GigCategory } from '@/lib/posts-store';
 
@@ -27,6 +28,7 @@ export default function GigDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { gigs } = usePosts();
   const { session, isDev } = useAuth();
+  const { startGigConversation } = useDevConversations();
   const realSession = !!session && !isDev;
   const gig = gigs.find((g) => g.id === id);
   const [busy, setBusy] = useState(false);
@@ -64,14 +66,18 @@ export default function GigDetailScreen() {
   const posterInitials =
     gig.anonymous || !gig.posterInitials ? '?' : gig.posterInitials;
   const posterAvatarUri = gig.anonymous ? null : gig.posterAvatarUrl;
-  const canMessage = !isOwn && !gig.anonymous && gig.ownerId !== 'seed';
+  // In dev there's no backend, so seed gigs (ownerId 'seed') are messageable
+  // too — the conversation is created client-side. Real sessions never see
+  // seed rows, so the `!realSession` branch is what unlocks the demo.
+  const canMessage =
+    !isOwn && !gig.anonymous && (!realSession || gig.ownerId !== 'seed');
   const firstName = gig.posterName?.split(' ')[0] ?? 'poster';
 
   async function handleMessage() {
     if (!gig || !session) return;
     if (!realSession) {
-      const key = (gig.posterName ?? '').split(' ')[0]?.toLowerCase() || 'marcus';
-      router.replace(`/chat/${key}` as never);
+      const convId = startGigConversation(gig);
+      router.replace(`/chat/${convId}` as never);
       return;
     }
     setErr(null);

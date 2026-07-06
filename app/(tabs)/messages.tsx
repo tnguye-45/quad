@@ -18,6 +18,7 @@ import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useAuth } from '@/lib/auth-context';
+import { useDevConversations } from '@/lib/dev-conversations';
 import {
   useConversations,
   useUnreadCounts,
@@ -33,16 +34,8 @@ type MockConvo = {
   time: string;
   unread?: boolean;
   active?: boolean;
+  sortAt: number;
 };
-
-const MOCK_CONVOS: MockConvo[] = [
-  { id: 'marcus', name: 'Marcus K.', initials: 'MK', context: 'Help moving a couch · $40', preview: 'Sounds good! See you at 3', time: '12m', unread: true, active: true },
-  { id: 'priya', name: 'Priya S.', initials: 'PS', context: 'SBN airport ride · $15', preview: 'I can grab you from Dillon', time: '1h', unread: true, active: true },
-  { id: 'jordan', name: 'Jordan L.', initials: 'JL', context: 'MATH 10560 tutor · $30/hr', preview: 'Want to meet at Hesburgh tonight?', time: '3h' },
-  { id: 'cse-cram', name: 'CSE 20110 cram', initials: 'CS', context: 'Hangout · 4 people', preview: 'Bringing snacks', time: '5h', active: true },
-  { id: 'aisha', name: 'Aisha M.', initials: 'AM', context: 'Senior portraits · $80', preview: 'Sent you a few sample shots', time: '1d' },
-  { id: 'sam', name: 'Sam R.', initials: 'SR', context: 'Dog walk · $15', preview: 'Thanks again — Bagel loved it', time: '2d' },
-];
 
 type Item = MockConvo | (ConversationSummary & { __real: true });
 
@@ -64,19 +57,41 @@ export default function MessagesScreen() {
   const realSession = !!session && !isDev;
   const { conversations, loading, error, refresh } = useConversations();
   const { byConversation: unreadByConversation } = useUnreadCounts();
+  const { conversations: devConversations } = useDevConversations();
   const [refreshing, setRefreshing] = useState(false);
 
   const useReal = realSession;
+
+  // Dev-mode conversations come from the in-memory store, so threads you start
+  // from a gig or join from a hangout show up here just like the real feed.
+  const devItems: MockConvo[] = devConversations
+    .map((co) => {
+      const last = co.messages[co.messages.length - 1];
+      const preview = last ? (last.from === 'me' ? `You: ${last.text}` : last.text) : 'No messages yet';
+      return {
+        id: co.id,
+        name: co.name,
+        initials: co.initials,
+        context: co.context,
+        preview,
+        time: timeAgo(last?.sentAt ?? 0),
+        unread: co.unread,
+        active: co.online,
+        sortAt: last?.sentAt ?? 0,
+      };
+    })
+    .sort((a, b) => b.sortAt - a.sortAt);
+
   const items: Item[] = useReal
     ? conversations.map((co) => ({ ...co, __real: true as const }))
-    : MOCK_CONVOS;
+    : devItems;
   const unreadCount = useReal
     ? conversations.filter((co) => co.unread || (unreadByConversation[co.id] ?? 0) > 0).length
-    : MOCK_CONVOS.filter((co) => co.unread).length;
+    : devItems.filter((co) => co.unread).length;
 
   const activeNow = useReal
     ? items.slice(0, 4)
-    : MOCK_CONVOS.filter((co) => co.active).slice(0, 6);
+    : devItems.filter((co) => co.active).slice(0, 6);
 
   const showLoading = useReal && loading && conversations.length === 0;
   const isEmpty = useReal && !loading && conversations.length === 0;

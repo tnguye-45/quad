@@ -133,7 +133,12 @@ function HangoutCard({
   const hostAvatarUri = hangout.anonymous ? null : hangout.hostAvatarUrl;
 
   return (
-    <View style={[styles.card, { borderBottomColor: c.border }]}>
+    <Pressable
+      onPress={() => router.push(`/hangout/${hangout.id}` as never)}
+      style={({ pressed }) => [
+        styles.card,
+        { borderBottomColor: c.border, opacity: pressed ? 0.6 : 1 },
+      ]}>
       <View style={styles.cardHead}>
         <Avatar uri={hostAvatarUri} initials={hostInitials} size={38} textSize={12} />
         <View style={styles.cardHeadText}>
@@ -168,14 +173,18 @@ function HangoutCard({
       </View>
 
       <Pressable
-        onPress={onJoin}
+        onPress={(e) => {
+          // Don't let the quick-RSVP tap also open the detail screen.
+          (e as unknown as { stopPropagation?: () => void }).stopPropagation?.();
+          onJoin();
+        }}
         style={({ pressed }) => [
           styles.joinBtn,
           { backgroundColor: c.tint, opacity: pressed ? 0.7 : 1 },
         ]}>
         <ThemedText style={[styles.joinBtnText, { color: c.background }]}>I&apos;m in</ThemedText>
       </Pressable>
-    </View>
+    </Pressable>
   );
 }
 

@@ -10,6 +10,8 @@ import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useAuth } from '@/lib/auth-context';
+import { useDevConversations } from '@/lib/dev-conversations';
+import { joinHangout } from '@/lib/messaging';
 import { usePosts } from '@/lib/posts-store';
 
 const VIBE_EMOJI: Record<string, string> = {
@@ -24,10 +26,13 @@ export default function HangoutDetailScreen() {
   const c = Colors[useColorScheme() ?? 'light'];
   const { id } = useLocalSearchParams<{ id: string }>();
   const { hangouts, rsvpHangout } = usePosts();
-  const { session } = useAuth();
+  const { session, isDev } = useAuth();
+  const realSession = !!session && !isDev;
+  const { joinHangoutConversation } = useDevConversations();
   const hangout = hangouts.find((h) => h.id === id);
   const [joining, setJoining] = useState(false);
   const [joined, setJoined] = useState(false);
+  const [convId, setConvId] = useState<string | null>(null);
 
   if (!hangout) {
     return (
@@ -69,10 +74,28 @@ export default function HangoutDetailScreen() {
     setJoining(true);
     try {
       await rsvpHangout(hangout.id);
+      // Joining a hangout means joining its group chat — resolve the
+      // conversation id so we can drop the user straight into it.
+      const cid = realSession
+        ? await joinHangout(hangout.id)
+        : joinHangoutConversation(hangout);
+      setConvId(cid);
       setJoined(true);
     } finally {
       setJoining(false);
     }
+  }
+
+  async function openGroupChat() {
+    if (!hangout) return;
+    let cid = convId;
+    if (!cid) {
+      cid = realSession
+        ? await joinHangout(hangout.id)
+        : joinHangoutConversation(hangout);
+      setConvId(cid);
+    }
+    if (cid) router.push(`/chat/${cid}` as never);
   }
 
   return (
@@ -134,33 +157,39 @@ export default function HangoutDetailScreen() {
         ) : null}
 
         <View style={styles.ctaBlock}>
-          {isOwn ? (
-            <View
-              style={[
-                styles.ctaDisabled,
-                { borderColor: c.border, backgroundColor: c.subtle },
-              ]}>
-              <ThemedText style={[styles.ctaDisabledText, { color: c.textMuted }]} type="mono">
-                you&apos;re hosting
-              </ThemedText>
-            </View>
+          {isOwn || joined ? (
+            <>
+              {isOwn ? (
+                <ThemedText
+                  style={[styles.hostingHint, { color: c.textMuted }]}
+                  type="mono">
+                  {"you're hosting · "}{hangout.going} going
+                </ThemedText>
+              ) : null}
+              <Pressable
+                onPress={openGroupChat}
+                style={({ pressed }) => [
+                  styles.cta,
+                  { backgroundColor: c.tint, opacity: pressed ? 0.85 : 1 },
+                ]}>
+                <ThemedText style={[styles.ctaText, { color: c.background }]}>
+                  Open group chat
+                </ThemedText>
+              </Pressable>
+            </>
           ) : (
             <Pressable
               onPress={onJoin}
-              disabled={joining || joined}
+              disabled={joining}
               style={({ pressed }) => [
                 styles.cta,
                 {
-                  backgroundColor: joined ? c.subtle : c.tint,
+                  backgroundColor: c.tint,
                   opacity: joining ? 0.5 : pressed ? 0.85 : 1,
                 },
               ]}>
-              <ThemedText
-                style={[
-                  styles.ctaText,
-                  { color: joined ? c.text : c.background },
-                ]}>
-                {joining ? 'Joining…' : joined ? "You're in" : "I'm in"}
+              <ThemedText style={[styles.ctaText, { color: c.background }]}>
+                {joining ? 'Joining…' : "I'm in"}
               </ThemedText>
             </Pressable>
           )}
@@ -271,6 +300,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   ctaText: { fontSize: 15, fontWeight: '700', letterSpacing: 0.2 },
+  hostingHint: {
+    fontSize: 11,
+    letterSpacing: 0.6,
+    textTransform: 'lowercase',
+    textAlign: 'center',
+    marginBottom: 2,
+  },
   ctaDisabled: {
     paddingVertical: 14,
     borderRadius: 12,

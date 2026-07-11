@@ -50,6 +50,15 @@ function fail(name, detail = '') {
   console.log(`  FAIL  ${name}${detail ? ' — ' + detail : ''}`);
 }
 
+// A network-level failure (host unreachable, DNS, TLS, offline) never reached
+// the server, so it says nothing about whether a table exists or RLS is on.
+// Treating it as "exists / RLS enforced" hides an offline run behind green
+// PASSes — detect it explicitly and fail loudly instead.
+const isNetworkError = (msg = '') =>
+  /fetch failed|network|ENOTFOUND|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|socket hang up|und_err/i.test(
+    msg,
+  );
+
 console.log('\nquad — Supabase backend verification\n');
 
 if (!url) {
@@ -103,16 +112,21 @@ const expectedTables = [
 for (const table of expectedTables) {
   const { error } = await supabase.from(table).select('*', { count: 'exact', head: true });
   if (error) {
-    // 42P01 = undefined_table, PGRST205 = schema cache miss. Either means
-    // migrations haven't run.
-    const missing = /(does not exist|PGRST205|schema cache|Could not find the table)/i.test(
-      error.message,
-    );
-    if (missing) {
-      fail(`table public.${table} exists`, 'run supabase/migrations/_bundle.sql in SQL Editor');
+    if (isNetworkError(error.message)) {
+      // Never reached the server — can't conclude anything about the table.
+      fail(`table public.${table} exists`, `unreachable (${error.message}) — check network/URL`);
     } else {
-      // Other errors (e.g. permission denied) still mean the table exists.
-      pass(`table public.${table} exists`, 'RLS enforced');
+      // 42P01 = undefined_table, PGRST205 = schema cache miss. Either means
+      // migrations haven't run.
+      const missing = /(does not exist|PGRST205|schema cache|Could not find the table)/i.test(
+        error.message,
+      );
+      if (missing) {
+        fail(`table public.${table} exists`, 'run supabase/migrations/_bundle.sql in SQL Editor');
+      } else {
+        // Other errors (e.g. permission denied) still mean the table exists.
+        pass(`table public.${table} exists`, 'RLS enforced');
+      }
     }
   } else {
     pass(`table public.${table} exists`);
@@ -124,7 +138,11 @@ const { error: insertError } = await supabase
   .from('profiles')
   .insert({ id: '00000000-0000-4000-8000-00000000abcd', display_name: 'verify-script' });
 if (insertError) {
-  pass('RLS blocks anon inserts on profiles', insertError.message.split('\n')[0]);
+  if (isNetworkError(insertError.message)) {
+    fail('RLS blocks anon inserts on profiles', `unreachable (${insertError.message})`);
+  } else {
+    pass('RLS blocks anon inserts on profiles', insertError.message.split('\n')[0]);
+  }
 } else {
   fail('RLS blocks anon inserts on profiles', 'insert SUCCEEDED — RLS is NOT enforced!');
 }

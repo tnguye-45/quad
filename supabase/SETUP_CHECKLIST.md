@@ -37,8 +37,9 @@ Only needed if step 2's verify reports tables missing.
 Open: <https://supabase.com/dashboard/project/anoosbiuaggassednkzt/sql/new>
 
 Open `supabase/migrations/_bundle.sql` in your editor, **select all → copy**,
-paste into the SQL Editor, click **Run**. It bundles all 7 migrations in order
-and should finish with "Success. No rows returned."
+paste into the SQL Editor, click **Run**. It bundles all 19 migrations
+(0001–0019) in order, is idempotent (safe to re-run), and should finish with
+"Success. No rows returned."
 
 Re-run `npm run verify-supabase` — all 10 tables should now report PASS.
 

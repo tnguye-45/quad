@@ -1,8 +1,21 @@
 import type { Session } from '@supabase/supabase-js';
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { Platform } from 'react-native';
 
 import { clearPushToken, registerForPushToken } from './notifications';
 import { supabase } from './supabase';
+
+// Where Supabase should send the browser after it verifies the confirmation
+// token. On the hosted web build the app lives under the `/quad/` subpath
+// (EXPO_PUBLIC_BASE_URL=/quad, set by deploy.yml), so a bare origin would 404.
+// Deriving from window.location keeps localhost dev working (base is empty
+// there). This URL must also be allowlisted in Supabase → Auth → URL
+// Configuration → Redirect URLs, or Supabase falls back to the Site URL.
+function emailRedirectTo(): string | undefined {
+  if (Platform.OS !== 'web' || typeof window === 'undefined') return undefined;
+  const base = process.env.EXPO_PUBLIC_BASE_URL ?? '';
+  return `${window.location.origin}${base}/`;
+}
 
 export type ProfileLink = { label: string; url: string };
 
@@ -154,7 +167,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!isAllowedEmail(email)) {
         return { error: `Use your @${EDU_DOMAIN} email to sign up.` };
       }
-      const { error } = await supabase.auth.signUp({ email: email.trim(), password });
+      const { error } = await supabase.auth.signUp({
+        email: email.trim(),
+        password,
+        options: { emailRedirectTo: emailRedirectTo() },
+      });
       return { error: error?.message ?? null };
     },
     async signIn(email, password) {
@@ -177,7 +194,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await supabase.auth.signOut();
     },
     async sendPasswordReset(email) {
-      const { error } = await supabase.auth.resetPasswordForEmail(email.trim());
+      const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+        redirectTo: emailRedirectTo(),
+      });
       return { error: error?.message ?? null };
     },
     async refreshProfile() {

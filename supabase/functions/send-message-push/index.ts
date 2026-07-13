@@ -31,6 +31,30 @@ const SERVICE_ROLE_KEY =
   Deno.env.get('SERVICE_ROLE_KEY') ??
   '';
 
+// ─────────────────────── caller authorization ───────────────────────
+// This function is meant to be invoked ONLY by our pg_net trigger
+// (notify_new_message), which forwards `Authorization: Bearer <service_role_key>`.
+// The public function URL is otherwise unauthenticated, so without this check
+// anyone who learns a conversation_id could POST a forged messages-INSERT
+// payload and blast attacker-controlled push notifications to that
+// conversation's members. The service role key never ships to a client, so
+// requiring it as the bearer token is a sufficient shared secret. Constant-time
+// compare avoids leaking the key a byte at a time.
+function timingSafeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let mismatch = 0;
+  for (let i = 0; i < a.length; i++) mismatch |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return mismatch === 0;
+}
+
+function isAuthorizedCaller(req: Request): boolean {
+  const header = req.headers.get('authorization') ?? '';
+  if (!header.toLowerCase().startsWith('bearer ')) return false;
+  const token = header.slice(7).trim();
+  if (!token || !SERVICE_ROLE_KEY) return false;
+  return timingSafeEqual(token, SERVICE_ROLE_KEY);
+}
+
 const EXPO_PUSH_URL = 'https://exp.host/--/api/v2/push/send';
 const BATCH_SIZE = 100;
 
@@ -246,6 +270,10 @@ Deno.serve(async (req: Request) => {
     return json(500, {
       error: 'missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY env',
     });
+  }
+
+  if (!isAuthorizedCaller(req)) {
+    return json(401, { error: 'unauthorized' });
   }
 
   let payload: WebhookPayload;

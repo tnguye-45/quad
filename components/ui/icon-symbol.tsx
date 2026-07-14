@@ -66,6 +66,7 @@ const MAPPING = {
   'xmark': 'close',
   'circle': 'radio-button-unchecked',
   'checkmark.circle.fill': 'check-circle',
+  'exclamationmark.triangle': 'error-outline',
 } as IconMapping;
 
 /**

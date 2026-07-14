@@ -32,6 +32,9 @@ export default function HangoutsScreen() {
   const { hangouts, rsvpHangout, loading, hydrated, error, refresh, loadMore, hasMore } = usePosts();
   const [refreshing, setRefreshing] = useState(false);
   const showLoading = !hydrated && loading && hangouts.length === 0;
+  // Don't invite them to "start a hangout" when the feed merely failed to load —
+  // the retry row above is already saying the opposite.
+  const isEmpty = hydrated && !error && hangouts.length === 0;
 
   async function onRefresh() {
     setRefreshing(true);
@@ -63,6 +66,7 @@ export default function HangoutsScreen() {
           error && !showLoading ? (
             <Pressable
               onPress={refresh}
+              accessibilityRole="button"
               style={({ pressed }) => [
                 styles.retryRow,
                 { borderColor: c.border, opacity: pressed ? 0.6 : 1 },
@@ -76,7 +80,7 @@ export default function HangoutsScreen() {
         ListEmptyComponent={
           showLoading ? (
             <SkeletonList count={3} avatarSize={38} />
-          ) : (
+          ) : isEmpty ? (
             <View style={styles.emptyBlock}>
               <IconSymbol name="person.3" size={36} color={c.textMuted} />
               <ThemedText style={[styles.emptyTitle, { color: c.text }]}>
@@ -87,6 +91,7 @@ export default function HangoutsScreen() {
               </ThemedText>
               <Pressable
                 onPress={() => router.push('/start-hangout' as never)}
+                accessibilityRole="button"
                 style={({ pressed }) => [
                   styles.emptyCta,
                   { backgroundColor: c.tint, opacity: pressed ? 0.8 : 1 },
@@ -96,7 +101,7 @@ export default function HangoutsScreen() {
                 </ThemedText>
               </Pressable>
             </View>
-          )
+          ) : null
         }
         contentContainerStyle={styles.list}
         showsVerticalScrollIndicator={false}
@@ -135,6 +140,8 @@ function HangoutCard({
   return (
     <Pressable
       onPress={() => router.push(`/hangout/${hangout.id}` as never)}
+      accessibilityRole="button"
+      accessibilityLabel={`Hangout: ${hangout.title}`}
       style={({ pressed }) => [
         styles.card,
         { borderBottomColor: c.border, opacity: pressed ? 0.6 : 1 },
@@ -178,6 +185,7 @@ function HangoutCard({
           (e as unknown as { stopPropagation?: () => void }).stopPropagation?.();
           onJoin();
         }}
+        accessibilityRole="button"
         style={({ pressed }) => [
           styles.joinBtn,
           { backgroundColor: c.tint, opacity: pressed ? 0.7 : 1 },

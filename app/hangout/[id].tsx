@@ -1,6 +1,6 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { Avatar } from '@/components/avatar';
 import { CommentThread } from '@/components/comment-thread';
@@ -25,7 +25,7 @@ const VIBE_EMOJI: Record<string, string> = {
 export default function HangoutDetailScreen() {
   const c = Colors[useColorScheme() ?? 'light'];
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { hangouts, rsvpHangout } = usePosts();
+  const { hangouts, rsvpHangout, hydrated } = usePosts();
   const { session, isDev } = useAuth();
   const realSession = !!session && !isDev;
   const { joinHangoutConversation } = useDevConversations();
@@ -33,6 +33,19 @@ export default function HangoutDetailScreen() {
   const [joining, setJoining] = useState(false);
   const [joined, setJoined] = useState(false);
   const [convId, setConvId] = useState<string | null>(null);
+  const [joinErr, setJoinErr] = useState<string | null>(null);
+
+  // Until the store hydrates, a miss means "not loaded yet", not "deleted" —
+  // deep links land here before the first fetch resolves.
+  if (!hangout && !hydrated) {
+    return (
+      <ThemedView style={[styles.screen, { backgroundColor: c.background }]}>
+        <View style={styles.emptyBlock}>
+          <ActivityIndicator color={c.textMuted} />
+        </View>
+      </ThemedView>
+    );
+  }
 
   if (!hangout) {
     return (
@@ -49,6 +62,7 @@ export default function HangoutDetailScreen() {
           </ThemedText>
           <Pressable
             onPress={() => router.back()}
+            accessibilityRole="button"
             style={({ pressed }) => [
               styles.closeBtn,
               { borderColor: c.border, opacity: pressed ? 0.5 : 1 },
@@ -72,6 +86,7 @@ export default function HangoutDetailScreen() {
   async function onJoin() {
     if (!hangout || isOwn || joining || joined) return;
     setJoining(true);
+    setJoinErr(null);
     try {
       await rsvpHangout(hangout.id);
       // Joining a hangout means joining its group chat — resolve the
@@ -79,8 +94,16 @@ export default function HangoutDetailScreen() {
       const cid = realSession
         ? await joinHangout(hangout.id)
         : joinHangoutConversation(hangout);
+      // joinHangout returns null on failure rather than throwing; without this
+      // the RSVP would look like it landed and "Open group chat" would no-op.
+      if (!cid) {
+        setJoinErr("Couldn't join the group chat. Try again.");
+        return;
+      }
       setConvId(cid);
       setJoined(true);
+    } catch {
+      setJoinErr("Couldn't RSVP. Check your connection and try again.");
     } finally {
       setJoining(false);
     }
@@ -96,6 +119,7 @@ export default function HangoutDetailScreen() {
       setConvId(cid);
     }
     if (cid) router.push(`/chat/${cid}` as never);
+    else setJoinErr("Couldn't open the group chat. Try again.");
   }
 
   return (
@@ -107,6 +131,7 @@ export default function HangoutDetailScreen() {
           </ThemedText>
           <Pressable
             onPress={() => router.back()}
+            accessibilityRole="button"
             hitSlop={10}
             style={({ pressed }) => [{ opacity: pressed ? 0.5 : 1 }]}>
             <ThemedText style={[styles.closeText, { color: c.textMuted }]} type="mono">
@@ -168,6 +193,7 @@ export default function HangoutDetailScreen() {
               ) : null}
               <Pressable
                 onPress={openGroupChat}
+                accessibilityRole="button"
                 style={({ pressed }) => [
                   styles.cta,
                   { backgroundColor: c.tint, opacity: pressed ? 0.85 : 1 },
@@ -181,6 +207,8 @@ export default function HangoutDetailScreen() {
             <Pressable
               onPress={onJoin}
               disabled={joining}
+              accessibilityRole="button"
+              accessibilityState={{ disabled: joining, busy: joining }}
               style={({ pressed }) => [
                 styles.cta,
                 {
@@ -193,6 +221,9 @@ export default function HangoutDetailScreen() {
               </ThemedText>
             </Pressable>
           )}
+          {joinErr ? (
+            <ThemedText style={[styles.error, { color: c.danger }]}>{joinErr}</ThemedText>
+          ) : null}
         </View>
 
         <CommentThread targetType="hangout" targetId={hangout.id} />
@@ -203,6 +234,7 @@ export default function HangoutDetailScreen() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
+  error: { fontSize: 13, lineHeight: 18, textAlign: 'center', marginTop: 10 },
   scroll: {
     paddingTop: 20,
     paddingBottom: 48,

@@ -25,6 +25,9 @@ export default function VoicesScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const { voices, voteVoice, loading, hydrated, error, refresh, loadMore, hasMore } = usePosts();
   const showLoading = !hydrated && loading && voices.length === 0;
+  // Don't invite them to post when the feed merely failed to load — the retry
+  // row above is already saying the opposite.
+  const isEmpty = hydrated && !error && voices.length === 0;
 
   const ordered = useMemo(() => {
     const list = [...voices];
@@ -56,7 +59,14 @@ export default function VoicesScreen() {
         {FILTERS.map((f) => {
           const active = f === filter;
           return (
-            <Pressable key={f} onPress={() => setFilter(f)} hitSlop={6} style={styles.filterChip}>
+            <Pressable
+              key={f}
+              onPress={() => setFilter(f)}
+              accessibilityRole="button"
+              accessibilityLabel={`Sort by ${f}`}
+              accessibilityState={{ selected: active }}
+              hitSlop={6}
+              style={styles.filterChip}>
               <ThemedText
                 style={[
                   styles.filterText,
@@ -85,6 +95,7 @@ export default function VoicesScreen() {
           error && !showLoading ? (
             <Pressable
               onPress={refresh}
+              accessibilityRole="button"
               style={({ pressed }) => [
                 styles.retryRow,
                 { borderColor: c.border, opacity: pressed ? 0.6 : 1 },
@@ -98,7 +109,7 @@ export default function VoicesScreen() {
         ListEmptyComponent={
           showLoading ? (
             <SkeletonList count={4} avatarSize={36} />
-          ) : (
+          ) : isEmpty ? (
             <View style={styles.emptyBlock}>
               <IconSymbol name="text.bubble" size={36} color={c.textMuted} />
               <ThemedText style={[styles.emptyTitle, { color: c.text }]}>
@@ -109,6 +120,7 @@ export default function VoicesScreen() {
               </ThemedText>
               <Pressable
                 onPress={() => router.push('/post-voice' as never)}
+                accessibilityRole="button"
                 style={({ pressed }) => [
                   styles.emptyCta,
                   { backgroundColor: c.tint, opacity: pressed ? 0.8 : 1 },
@@ -118,7 +130,7 @@ export default function VoicesScreen() {
                 </ThemedText>
               </Pressable>
             </View>
-          )
+          ) : null
         }
         contentContainerStyle={styles.list}
         showsVerticalScrollIndicator={false}
@@ -179,6 +191,9 @@ function VoiceCard({
       <View style={styles.voteRail}>
         <Pressable
           onPress={press(1)}
+          accessibilityRole="button"
+          accessibilityLabel="Upvote"
+          accessibilityState={{ selected: vote === 1 }}
           hitSlop={10}
           style={({ pressed }) => [
             styles.voteBtn,
@@ -198,6 +213,9 @@ function VoiceCard({
         </ThemedText>
         <Pressable
           onPress={press(-1)}
+          accessibilityRole="button"
+          accessibilityLabel="Downvote"
+          accessibilityState={{ selected: vote === -1 }}
           hitSlop={10}
           style={({ pressed }) => [
             styles.voteBtn,
@@ -241,7 +259,17 @@ function VoiceCard({
             </ThemedText>
           </View>
           <View style={{ flex: 1 }} />
-          <Pressable hitSlop={6} style={({ pressed }) => [{ opacity: pressed ? 0.5 : 1 }]}>
+          <Pressable
+            onPress={() =>
+              router.push({
+                pathname: '/report',
+                params: { type: 'voice', id: voice.id },
+              })
+            }
+            accessibilityRole="button"
+            accessibilityLabel="Report this voice"
+            hitSlop={6}
+            style={({ pressed }) => [{ opacity: pressed ? 0.5 : 1 }]}>
             <IconSymbol name="ellipsis" size={16} color={c.textMuted} />
           </Pressable>
         </View>

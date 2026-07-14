@@ -268,7 +268,8 @@ export function useThread(conversationId: string | undefined): {
   messages: Message[];
   loading: boolean;
   error: string | null;
-  send: (args: SendArgs) => Promise<void>;
+  /** Resolves true when the message reached the server, false on failure. */
+  send: (args: SendArgs) => Promise<boolean>;
   /** Other members' last_read_at timestamps (ms epoch). Excludes the caller. */
   otherReads: MemberReadState[];
   /** Other members typing right now. Excludes the caller. */
@@ -533,11 +534,13 @@ export function useThread(conversationId: string | undefined): {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [realSession, conversationId, session?.user.id]);
 
-  const send = async (args: SendArgs) => {
-    if (!realSession || !conversationId) return;
+  // Resolves true when the message reached the server. Callers use the result
+  // to decide whether to restore the draft they optimistically cleared.
+  const send = async (args: SendArgs): Promise<boolean> => {
+    if (!realSession || !conversationId) return false;
     const trimmed = (args.body ?? '').trim();
     const hasImage = !!args.image?.url;
-    if (!trimmed && !hasImage) return;
+    if (!trimmed && !hasImage) return false;
     const payload: Record<string, unknown> = {
       conversation_id: conversationId,
       sender_id: session!.user.id,
@@ -548,11 +551,15 @@ export function useThread(conversationId: string | undefined): {
       payload.image_width = args.image.width;
       payload.image_height = args.image.height;
     }
+    // Clear any prior failure so a stale banner doesn't outlive a good send.
+    setError(null);
     const { error: sendErr } = await supabase.from('messages').insert(payload);
     if (sendErr) {
       console.warn('[messaging] send failed:', sendErr.message);
       setError(sendErr.message);
-    } else if (channelRef.current && lastTypingSentRef.current) {
+      return false;
+    }
+    if (channelRef.current && lastTypingSentRef.current) {
       // Drop typing state on send so the indicator doesn't linger after we
       // actually sent the message.
       lastTypingSentRef.current = false;
@@ -561,6 +568,7 @@ export function useThread(conversationId: string | undefined): {
         displayName: myDisplayNameRef.current,
       });
     }
+    return true;
   };
 
   // Typing-indicator debouncer. We broadcast `{ typing: true }` on the first

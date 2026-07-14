@@ -1,6 +1,6 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { Avatar } from '@/components/avatar';
 import { CommentThread } from '@/components/comment-thread';
@@ -26,13 +26,25 @@ const CATEGORY_EMOJI: Record<GigCategory, string> = {
 export default function GigDetailScreen() {
   const c = Colors[useColorScheme() ?? 'light'];
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { gigs } = usePosts();
+  const { gigs, hydrated } = usePosts();
   const { session, isDev } = useAuth();
   const { startGigConversation } = useDevConversations();
   const realSession = !!session && !isDev;
   const gig = gigs.find((g) => g.id === id);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  // Until the store hydrates, a miss means "not loaded yet", not "deleted" —
+  // deep links land here before the first fetch resolves.
+  if (!gig && !hydrated) {
+    return (
+      <ThemedView style={[styles.screen, { backgroundColor: c.background }]}>
+        <View style={styles.emptyBlock}>
+          <ActivityIndicator color={c.textMuted} />
+        </View>
+      </ThemedView>
+    );
+  }
 
   if (!gig) {
     return (
@@ -49,6 +61,7 @@ export default function GigDetailScreen() {
           </ThemedText>
           <Pressable
             onPress={() => router.back()}
+            accessibilityRole="button"
             style={({ pressed }) => [
               styles.cta,
               { backgroundColor: c.tint, opacity: pressed ? 0.85 : 1, marginTop: 16, alignSelf: 'stretch' },
@@ -179,6 +192,8 @@ export default function GigDetailScreen() {
             <Pressable
               onPress={handleMessage}
               disabled={busy}
+              accessibilityRole="button"
+              accessibilityState={{ disabled: busy, busy }}
               style={({ pressed }) => [
                 styles.cta,
                 { backgroundColor: c.tint, opacity: busy ? 0.5 : pressed ? 0.85 : 1 },
@@ -209,7 +224,7 @@ export default function GigDetailScreen() {
             <ThemedText style={[styles.error, { color: c.danger }]}>{err}</ThemedText>
           ) : null}
 
-          <Pressable onPress={() => router.back()} style={styles.cancelBtn}>
+          <Pressable onPress={() => router.back()} accessibilityRole="button" style={styles.cancelBtn}>
             <ThemedText style={[styles.cancelText, { color: c.textMuted }]} type="mono">
               close
             </ThemedText>

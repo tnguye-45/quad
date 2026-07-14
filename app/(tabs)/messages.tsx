@@ -94,7 +94,7 @@ export default function MessagesScreen() {
     : devItems.filter((co) => co.active).slice(0, 6);
 
   const showLoading = useReal && loading && conversations.length === 0;
-  const isEmpty = useReal && !loading && conversations.length === 0;
+  const isEmpty = useReal && !loading && !error && conversations.length === 0;
 
   async function onRefresh() {
     setRefreshing(true);
@@ -121,7 +121,7 @@ export default function MessagesScreen() {
           const initials = isReal ? co.partnerInitials : co.initials;
           const avatarUri = isReal ? co.partnerAvatarUrl : null;
           const context = isReal ? co.contextLabel : co.context;
-          const preview = isReal ? co.preview : co.preview;
+          const preview = co.preview;
           const time = isReal ? timeAgo(co.preview_at) : co.time;
           const unread = isReal
             ? co.unread || (unreadByConversation[co.id] ?? 0) > 0
@@ -129,6 +129,8 @@ export default function MessagesScreen() {
           return (
             <Pressable
               onPress={() => router.push(`/chat/${co.id}` as never)}
+              accessibilityRole="button"
+              accessibilityLabel={`Open chat with ${name}`}
               style={({ pressed }) => [
                 styles.row,
                 { opacity: pressed ? 0.5 : 1 },
@@ -176,6 +178,7 @@ export default function MessagesScreen() {
             {useReal && error ? (
               <Pressable
                 onPress={refresh}
+                accessibilityRole="button"
                 style={({ pressed }) => [
                   styles.retryRow,
                   { borderColor: c.border, opacity: pressed ? 0.6 : 1 },
@@ -200,11 +203,13 @@ export default function MessagesScreen() {
                       <Pressable
                         key={co.id}
                         onPress={() => router.push(`/chat/${co.id}` as never)}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Open chat with ${name}`}
                         hitSlop={4}
                         style={styles.activeItem}>
                         <View style={styles.activeAvatarWrap}>
                           <Avatar uri={avatarUri} initials={initials} size={56} textSize={14} />
-                          <View style={[styles.activeDot, { backgroundColor: '#22c55e', borderColor: c.background }]} />
+                          <View style={[styles.activeDot, { backgroundColor: c.online, borderColor: c.background }]} />
                         </View>
                         <ThemedText
                           style={[styles.activeName, { color: c.text }]}
@@ -233,6 +238,7 @@ export default function MessagesScreen() {
               </ThemedText>
               <Pressable
                 onPress={() => router.push('/(tabs)' as never)}
+                accessibilityRole="button"
                 style={({ pressed }) => [
                   styles.emptyCta,
                   { backgroundColor: c.tint, opacity: pressed ? 0.8 : 1 },

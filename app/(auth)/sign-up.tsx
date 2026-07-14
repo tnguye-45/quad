@@ -1,5 +1,5 @@
 import { Link, router } from 'expo-router';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import {
   KeyboardAvoidingView,
   Platform,
@@ -13,6 +13,7 @@ import {
 import { NamePlaque } from '@/components/logo';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { isAllowedEmail, useAuth } from '@/lib/auth-context';
@@ -24,9 +25,13 @@ export default function SignUpScreen() {
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
+  const passwordRef = useRef<TextInput>(null);
 
   const emailLooksBad = email.length > 0 && !isAllowedEmail(email);
-  const canSubmit = email.length > 3 && password.length >= 8 && !busy;
+  // Gate on the same check the hint shows, so we don't enable a button that
+  // can only round-trip to the server for a rejection we already predicted.
+  const canSubmit = isAllowedEmail(email) && password.length >= 8 && !busy;
 
   async function handleSubmit() {
     setErr(null);
@@ -72,21 +77,41 @@ export default function SignUpScreen() {
                 autoCapitalize="none"
                 autoComplete="email"
                 keyboardType="email-address"
+                returnKeyType="next"
+                onSubmitEditing={() => passwordRef.current?.focus()}
                 style={[styles.input, { color: c.text }]}
               />
               <View style={[styles.underline, { backgroundColor: emailLooksBad ? c.danger : c.border }]} />
             </FieldGroup>
 
             <FieldGroup label="Password" colors={c}>
-              <TextInput
-                value={password}
-                onChangeText={setPassword}
-                placeholder="at least 8 characters"
-                placeholderTextColor={c.textMuted}
-                secureTextEntry
-                autoComplete="new-password"
-                style={[styles.input, { color: c.text }]}
-              />
+              <View style={styles.passwordRow}>
+                <TextInput
+                  ref={passwordRef}
+                  value={password}
+                  onChangeText={setPassword}
+                  placeholder="at least 8 characters"
+                  placeholderTextColor={c.textMuted}
+                  secureTextEntry={!showPassword}
+                  autoComplete="new-password"
+                  returnKeyType="go"
+                  onSubmitEditing={() => {
+                    if (canSubmit) handleSubmit();
+                  }}
+                  style={[styles.input, styles.passwordInput, { color: c.text }]}
+                />
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={showPassword ? 'Hide password' : 'Show password'}
+                  onPress={() => setShowPassword((v) => !v)}
+                  hitSlop={8}>
+                  <IconSymbol
+                    name={showPassword ? 'eye.slash' : 'eye'}
+                    size={20}
+                    color={c.textMuted}
+                  />
+                </Pressable>
+              </View>
               <View style={[styles.underline, { backgroundColor: c.border }]} />
             </FieldGroup>
 
@@ -95,6 +120,8 @@ export default function SignUpScreen() {
             ) : null}
 
             <Pressable
+              accessibilityRole="button"
+              accessibilityState={{ disabled: !canSubmit }}
               disabled={!canSubmit}
               onPress={handleSubmit}
               style={({ pressed }) => [
@@ -205,6 +232,14 @@ const styles = StyleSheet.create({
     fontSize: 17,
     paddingVertical: 8,
     paddingHorizontal: 0,
+  },
+  passwordRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  passwordInput: {
+    flex: 1,
   },
   underline: { height: 1 },
   hint: {

@@ -1,6 +1,6 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { CommentThread } from '@/components/comment-thread';
 import { ThemedText } from '@/components/themed-text';
@@ -13,9 +13,21 @@ import { usePosts, VOICE_TOPIC_EMOJI } from '@/lib/posts-store';
 export default function VoiceDetailScreen() {
   const c = Colors[useColorScheme() ?? 'light'];
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { voices, voteVoice } = usePosts();
+  const { voices, voteVoice, hydrated } = usePosts();
   const voice = voices.find((v) => v.id === id);
   const [vote, setVote] = useState<0 | 1 | -1>(0);
+
+  // Until the store hydrates, a miss means "not loaded yet", not "deleted" —
+  // deep links land here before the first fetch resolves.
+  if (!voice && !hydrated) {
+    return (
+      <ThemedView style={[styles.screen, { backgroundColor: c.background }]}>
+        <View style={styles.emptyBlock}>
+          <ActivityIndicator color={c.textMuted} />
+        </View>
+      </ThemedView>
+    );
+  }
 
   if (!voice) {
     return (
@@ -32,6 +44,7 @@ export default function VoiceDetailScreen() {
           </ThemedText>
           <Pressable
             onPress={() => router.back()}
+            accessibilityRole="button"
             style={({ pressed }) => [
               styles.closeBtn,
               { borderColor: c.border, opacity: pressed ? 0.5 : 1 },
@@ -73,6 +86,7 @@ export default function VoiceDetailScreen() {
           </ThemedText>
           <Pressable
             onPress={() => router.back()}
+            accessibilityRole="button"
             hitSlop={10}
             style={({ pressed }) => [{ opacity: pressed ? 0.5 : 1 }]}>
             <ThemedText style={[styles.closeText, { color: c.textMuted }]} type="mono">
@@ -94,6 +108,9 @@ export default function VoiceDetailScreen() {
         <View style={[styles.voteBlock, { borderTopColor: c.border, borderBottomColor: c.border }]}>
           <Pressable
             onPress={press(1)}
+            accessibilityRole="button"
+            accessibilityLabel="Upvote"
+            accessibilityState={{ selected: vote === 1 }}
             hitSlop={10}
             style={({ pressed }) => [
               styles.voteBtn,
@@ -111,6 +128,9 @@ export default function VoiceDetailScreen() {
           </ThemedText>
           <Pressable
             onPress={press(-1)}
+            accessibilityRole="button"
+            accessibilityLabel="Downvote"
+            accessibilityState={{ selected: vote === -1 }}
             hitSlop={10}
             style={({ pressed }) => [
               styles.voteBtn,

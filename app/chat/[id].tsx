@@ -113,6 +113,8 @@ function Header({
     <View style={[styles.header, { borderBottomColor: c.border, backgroundColor: c.background }]}>
       <Pressable
         onPress={() => router.back()}
+        accessibilityRole="button"
+        accessibilityLabel="Go back"
         hitSlop={12}
         style={({ pressed }) => [styles.backBtn, { opacity: pressed ? 0.5 : 1 }]}>
         <IconSymbol name="chevron.left" size={26} color={c.text} />
@@ -169,6 +171,7 @@ function RealChat({
     partnerInitials,
     partnerAvatarUrl,
     loading,
+    error,
     send,
     conversation,
     otherReads,
@@ -204,13 +207,19 @@ function RealChat({
       }
       setPendingImage(null);
       setDraft('');
-      await send({
+      const ok = await send({
         body: text || undefined,
         image: { url: out.url, width: out.width, height: out.height },
       });
+      // Hand the draft back rather than silently eating what they typed.
+      if (!ok) {
+        setDraft(text);
+        setPendingImage(pendingImage);
+      }
     } else {
       setDraft('');
-      await send({ body: text });
+      const ok = await send({ body: text });
+      if (!ok) setDraft(text);
     }
   }
 
@@ -364,6 +373,8 @@ function RealChat({
               />
               <Pressable
                 onPress={() => setPendingImage(null)}
+                accessibilityRole="button"
+                accessibilityLabel="Remove photo"
                 hitSlop={8}
                 style={({ pressed }) => [
                   styles.pendingClose,
@@ -375,6 +386,15 @@ function RealChat({
                 style={[styles.pendingLabel, { color: c.textMuted }]}
                 type="mono">
                 {uploading ? 'uploading…' : 'ready to send'}
+              </ThemedText>
+            </View>
+          ) : null}
+
+          {error ? (
+            <View style={[styles.errorBar, { borderTopColor: c.border }]}>
+              <IconSymbol name="exclamationmark.triangle" size={13} color={c.danger} />
+              <ThemedText style={[styles.errorText, { color: c.danger }]} type="mono">
+                couldn&apos;t send — check your connection
               </ThemedText>
             </View>
           ) : null}
@@ -480,6 +500,8 @@ function MessageBubble({
         ]}>
         <Pressable
           onPress={() => onTapImage(message.image_url!)}
+          accessibilityRole="button"
+          accessibilityLabel="View image full size"
           style={({ pressed }) => ({ opacity: pressed ? 0.85 : 1 })}>
           <Image
             source={{ uri: message.image_url }}
@@ -612,6 +634,8 @@ function ImageViewerModal({
       <View style={styles.viewerBackdrop}>
         <Pressable
           onPress={onClose}
+          accessibilityRole="button"
+          accessibilityLabel="Close"
           hitSlop={12}
           style={({ pressed }) => [styles.viewerClose, { opacity: pressed ? 0.6 : 1 }]}>
           <IconSymbol name="xmark" size={22} color="#FFFFFF" />
@@ -772,6 +796,9 @@ function InputBar({
         <Pressable
           onPress={onAttach}
           disabled={disabled}
+          accessibilityRole="button"
+          accessibilityLabel="Add a photo"
+          accessibilityState={{ disabled: !!disabled }}
           hitSlop={6}
           style={({ pressed }) => [
             styles.attachBtn,
@@ -796,6 +823,9 @@ function InputBar({
       <Pressable
         onPress={onSend}
         disabled={!canSend}
+        accessibilityRole="button"
+        accessibilityLabel="Send message"
+        accessibilityState={{ disabled: !canSend }}
         hitSlop={6}
         style={({ pressed }) => [
           styles.sendBtn,
@@ -857,6 +887,19 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 16,
     gap: 2,
+  },
+  errorBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  errorText: {
+    fontSize: 11,
+    letterSpacing: 0.4,
   },
   loadingHint: {
     fontSize: 10,

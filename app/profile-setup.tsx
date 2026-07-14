@@ -206,6 +206,9 @@ export default function ProfileSetupScreen() {
           <View style={styles.avatarBlock}>
             <Pressable
               onPress={handlePickAvatar}
+              accessibilityRole="button"
+              accessibilityLabel={avatarUrl ? 'Change profile photo' : 'Choose a profile photo'}
+              accessibilityState={{ disabled: avatarBusy }}
               disabled={avatarBusy}
               hitSlop={8}
               style={({ pressed }) => [
@@ -259,6 +262,9 @@ export default function ProfileSetupScreen() {
                   <Pressable
                     key={y}
                     onPress={() => setYear(y)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Year ${y}`}
+                    accessibilityState={{ selected: active }}
                     style={styles.yearItem}>
                     <View
                       style={[
@@ -348,6 +354,8 @@ export default function ProfileSetupScreen() {
                   <Pressable
                     key={p.id}
                     onPress={() => addPlatformLink(p)}
+                    accessibilityRole="button"
+                    accessibilityState={{ disabled: alreadyAdded }}
                     disabled={alreadyAdded}
                     style={({ pressed }) => [
                       styles.chip,
@@ -366,6 +374,7 @@ export default function ProfileSetupScreen() {
               })}
               <Pressable
                 onPress={addCustomLink}
+                accessibilityRole="button"
                 style={({ pressed }) => [
                   styles.chip,
                   {
@@ -405,6 +414,8 @@ export default function ProfileSetupScreen() {
                     </View>
                     <Pressable
                       onPress={() => removeLink(i)}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Remove ${l.label || 'this'} link`}
                       hitSlop={8}
                       style={({ pressed }) => [styles.removeBtn, { opacity: pressed ? 0.5 : 1 }]}>
                       <ThemedText
@@ -425,6 +436,8 @@ export default function ProfileSetupScreen() {
           <Pressable
             disabled={!canSubmit}
             onPress={handleSave}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: !canSubmit }}
             style={({ pressed }) => [
               styles.cta,
               {
@@ -438,7 +451,11 @@ export default function ProfileSetupScreen() {
           </Pressable>
 
           {isEditing ? (
-            <Pressable onPress={() => router.back()} style={styles.cancelBtn} hitSlop={8}>
+            <Pressable
+              onPress={() => router.back()}
+              accessibilityRole="button"
+              style={styles.cancelBtn}
+              hitSlop={8}>
               <ThemedText style={[styles.cancelText, { color: c.textMuted }]} type="mono">
                 cancel
               </ThemedText>

@@ -94,6 +94,7 @@ export function LegalDocument({
         <View style={styles.topRow}>
           <Pressable
             onPress={() => router.back()}
+            accessibilityRole="button"
             hitSlop={10}
             style={({ pressed }) => [{ opacity: pressed ? 0.5 : 1 }]}>
             <ThemedText

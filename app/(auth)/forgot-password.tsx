@@ -67,6 +67,7 @@ export default function ForgotPasswordScreen() {
                 {' '}for the reset link.
               </ThemedText>
               <Pressable
+                accessibilityRole="button"
                 onPress={() => router.replace('/(auth)/sign-in')}
                 style={({ pressed }) => [
                   styles.cta,
@@ -91,6 +92,10 @@ export default function ForgotPasswordScreen() {
                   autoCapitalize="none"
                   autoComplete="email"
                   keyboardType="email-address"
+                  returnKeyType="go"
+                  onSubmitEditing={() => {
+                    if (email.length >= 4 && !busy) handleSubmit();
+                  }}
                   style={[styles.input, { color: c.text }]}
                 />
                 <View style={[styles.underline, { backgroundColor: c.border }]} />
@@ -99,6 +104,8 @@ export default function ForgotPasswordScreen() {
                 <ThemedText style={[styles.error, { color: c.danger }]}>{err}</ThemedText>
               ) : null}
               <Pressable
+                accessibilityRole="button"
+                accessibilityState={{ disabled: email.length < 4 || busy }}
                 disabled={email.length < 4 || busy}
                 onPress={handleSubmit}
                 style={({ pressed }) => [
@@ -113,6 +120,7 @@ export default function ForgotPasswordScreen() {
                 </ThemedText>
               </Pressable>
               <Pressable
+                accessibilityRole="button"
                 onPress={() => router.replace('/(auth)/sign-in')}
                 style={styles.cancelBtn}
                 hitSlop={8}>

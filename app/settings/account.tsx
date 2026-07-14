@@ -112,6 +112,7 @@ export default function AccountSettingsScreen() {
           <View style={styles.topRow}>
             <Pressable
               onPress={() => router.back()}
+              accessibilityRole="button"
               hitSlop={10}
               style={({ pressed }) => [{ opacity: pressed ? 0.5 : 1 }]}>
               <ThemedText
@@ -138,6 +139,7 @@ export default function AccountSettingsScreen() {
             <View style={styles.linkList}>
               <Link href="/settings/notifications" asChild>
                 <Pressable
+                  accessibilityRole="button"
                   style={({ pressed }) => [
                     styles.linkRow,
                     { borderBottomColor: c.border, opacity: pressed ? 0.5 : 1 },
@@ -149,6 +151,7 @@ export default function AccountSettingsScreen() {
               </Link>
               <Link href="/settings/blocked" asChild>
                 <Pressable
+                  accessibilityRole="button"
                   style={({ pressed }) => [
                     styles.linkRow,
                     { borderBottomColor: c.border, opacity: pressed ? 0.5 : 1 },
@@ -170,6 +173,7 @@ export default function AccountSettingsScreen() {
             <View style={styles.linkList}>
               <Link href="/legal/privacy" asChild>
                 <Pressable
+                  accessibilityRole="button"
                   style={({ pressed }) => [
                     styles.linkRow,
                     { borderBottomColor: c.border, opacity: pressed ? 0.5 : 1 },
@@ -181,6 +185,7 @@ export default function AccountSettingsScreen() {
               </Link>
               <Link href="/legal/tos" asChild>
                 <Pressable
+                  accessibilityRole="button"
                   style={({ pressed }) => [
                     styles.linkRow,
                     { borderBottomColor: c.border, opacity: pressed ? 0.5 : 1 },
@@ -239,6 +244,9 @@ export default function AccountSettingsScreen() {
             <Pressable
               disabled={!canDelete}
               onPress={handleDelete}
+              accessibilityRole="button"
+              accessibilityLabel="Delete your account permanently"
+              accessibilityState={{ disabled: !canDelete }}
               style={({ pressed }) => [
                 styles.deleteBtn,
                 {

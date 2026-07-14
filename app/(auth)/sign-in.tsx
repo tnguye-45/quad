@@ -1,5 +1,5 @@
 import { Link } from 'expo-router';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import {
   KeyboardAvoidingView,
   Platform,
@@ -24,6 +24,7 @@ export default function SignInScreen() {
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const passwordRef = useRef<TextInput>(null);
 
   const canSubmit = email.length > 3 && password.length > 0 && !busy;
 
@@ -64,6 +65,8 @@ export default function SignInScreen() {
                 autoCapitalize="none"
                 autoComplete="email"
                 keyboardType="email-address"
+                returnKeyType="next"
+                onSubmitEditing={() => passwordRef.current?.focus()}
                 style={[styles.input, { color: c.text }]}
               />
               <View style={[styles.underline, { backgroundColor: c.border }]} />
@@ -71,12 +74,17 @@ export default function SignInScreen() {
 
             <FieldGroup label="Password" colors={c}>
               <TextInput
+                ref={passwordRef}
                 value={password}
                 onChangeText={setPassword}
                 placeholder="••••••••"
                 placeholderTextColor={c.textMuted}
                 secureTextEntry
                 autoComplete="current-password"
+                returnKeyType="go"
+                onSubmitEditing={() => {
+                  if (canSubmit) handleSubmit();
+                }}
                 style={[styles.input, { color: c.text }]}
               />
               <View style={[styles.underline, { backgroundColor: c.border }]} />
@@ -93,6 +101,8 @@ export default function SignInScreen() {
             ) : null}
 
             <Pressable
+              accessibilityRole="button"
+              accessibilityState={{ disabled: !canSubmit }}
               disabled={!canSubmit}
               onPress={handleSubmit}
               style={({ pressed }) => [

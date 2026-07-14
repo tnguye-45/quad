@@ -35,6 +35,7 @@ export default function LegalScreen() {
           <NamePlaque size="sm" />
           <Pressable
             onPress={() => router.back()}
+            accessibilityRole="button"
             hitSlop={10}
             style={({ pressed }) => [styles.closeBtn, { opacity: pressed ? 0.5 : 1 }]}>
             <ThemedText style={[styles.closeText, { color: c.textMuted }]} type="mono">
@@ -100,6 +101,7 @@ function LegalRow({
   return (
     <Pressable
       onPress={onPress}
+      accessibilityRole="link"
       style={({ pressed }) => [
         styles.row,
         { borderBottomColor: c.border, opacity: pressed ? 0.5 : 1 },

@@ -73,6 +73,7 @@ export default function WelcomeScreen() {
 
       <View style={[styles.ctaBlock, { borderTopColor: c.border }]}>
         <Pressable
+          accessibilityRole="button"
           style={({ pressed }) => [
             styles.cta,
             { backgroundColor: c.tint, opacity: pressed ? 0.85 : 1 },
@@ -82,7 +83,10 @@ export default function WelcomeScreen() {
             Sign up with @nd.edu
           </ThemedText>
         </Pressable>
-        <Pressable onPress={() => router.push('/(auth)/sign-in')} hitSlop={8}>
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => router.push('/(auth)/sign-in')}
+          hitSlop={8}>
           <ThemedText style={[styles.ctaSubtle, { color: c.textSecondary }]}>
             Already have an account?{' '}
             <ThemedText style={[styles.ctaSubtleLink, { color: c.text }]}>
@@ -92,7 +96,11 @@ export default function WelcomeScreen() {
         </Pressable>
 
         {__DEV__ ? (
-          <Pressable onPress={enableDevAuth} style={styles.devButton} hitSlop={8}>
+          <Pressable
+            accessibilityRole="button"
+            onPress={enableDevAuth}
+            style={styles.devButton}
+            hitSlop={8}>
             <ThemedText
               style={[styles.devText, { color: c.textMuted }]}
               type="mono">

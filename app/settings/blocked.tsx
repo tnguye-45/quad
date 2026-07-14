@@ -95,6 +95,7 @@ export default function BlockedUsersScreen() {
         <View style={styles.topRow}>
           <Pressable
             onPress={() => router.back()}
+            accessibilityRole="button"
             hitSlop={10}
             style={({ pressed }) => [{ opacity: pressed ? 0.5 : 1 }]}>
             <ThemedText
@@ -146,6 +147,8 @@ export default function BlockedUsersScreen() {
                   onPress={() =>
                     unblock(r.blocked_id, r.blocked?.display_name ?? null)
                   }
+                  accessibilityRole="button"
+                  accessibilityLabel={`Unblock ${r.blocked?.display_name ?? 'this user'}`}
                   hitSlop={6}
                   style={({ pressed }) => [
                     styles.unblockBtn,

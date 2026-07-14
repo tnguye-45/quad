@@ -101,6 +101,9 @@ export default function PostVoiceScreen() {
                   <Pressable
                     key={t}
                     onPress={() => setTopic(t)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Topic: ${t}`}
+                    accessibilityState={{ selected: active }}
                     hitSlop={4}
                     style={styles.story}>
                     <View
@@ -168,6 +171,7 @@ export default function PostVoiceScreen() {
           <Pressable
             disabled={!canSubmit}
             onPress={handleSubmit}
+            accessibilityRole="button"
             style={({ pressed }) => [
               styles.cta,
               {
@@ -180,7 +184,11 @@ export default function PostVoiceScreen() {
             </ThemedText>
           </Pressable>
 
-          <Pressable onPress={() => router.back()} style={styles.cancelBtn} hitSlop={8}>
+          <Pressable
+            onPress={() => router.back()}
+            accessibilityRole="button"
+            style={styles.cancelBtn}
+            hitSlop={8}>
             <ThemedText style={[styles.cancelText, { color: c.textMuted }]} type="mono">
               cancel
             </ThemedText>

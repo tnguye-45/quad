@@ -101,6 +101,7 @@ export default function ReportScreen() {
           <View style={styles.topRow}>
             <Pressable
               onPress={() => router.back()}
+              accessibilityRole="button"
               hitSlop={10}
               style={({ pressed }) => [{ opacity: pressed ? 0.5 : 1 }]}>
               <ThemedText style={[styles.backText, { color: c.textMuted }]} type="mono">
@@ -131,6 +132,7 @@ export default function ReportScreen() {
           <View style={styles.topRow}>
             <Pressable
               onPress={() => router.back()}
+              accessibilityRole="button"
               hitSlop={10}
               style={({ pressed }) => [{ opacity: pressed ? 0.5 : 1 }]}>
               <ThemedText
@@ -164,6 +166,8 @@ export default function ReportScreen() {
                   <Pressable
                     key={r.key}
                     onPress={() => setReason(r.key)}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected }}
                     style={({ pressed }) => [
                       styles.reasonRow,
                       {
@@ -226,6 +230,7 @@ export default function ReportScreen() {
             <Pressable
               disabled={!canSubmit}
               onPress={handleSubmit}
+              accessibilityRole="button"
               style={({ pressed }) => [
                 styles.submitBtn,
                 {

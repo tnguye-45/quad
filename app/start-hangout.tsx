@@ -125,6 +125,8 @@ export default function StartHangoutScreen() {
                   <Pressable
                     key={v}
                     onPress={() => setVibe(v)}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: active }}
                     hitSlop={4}
                     style={styles.story}>
                     <View
@@ -205,6 +207,7 @@ export default function StartHangoutScreen() {
           <Pressable
             disabled={!canSubmit}
             onPress={handleSubmit}
+            accessibilityRole="button"
             style={({ pressed }) => [
               styles.cta,
               {
@@ -217,7 +220,11 @@ export default function StartHangoutScreen() {
             </ThemedText>
           </Pressable>
 
-          <Pressable onPress={() => router.back()} style={styles.cancelBtn} hitSlop={8}>
+          <Pressable
+            onPress={() => router.back()}
+            accessibilityRole="button"
+            style={styles.cancelBtn}
+            hitSlop={8}>
             <ThemedText style={[styles.cancelText, { color: c.textMuted }]} type="mono">
               cancel
             </ThemedText>

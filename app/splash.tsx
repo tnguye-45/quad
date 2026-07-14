@@ -20,6 +20,8 @@ export default function SplashScreen() {
       </View>
 
       <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Get started"
         onPress={() => router.replace('/welcome')}
         style={({ pressed }) => [
           styles.playRing,

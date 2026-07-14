@@ -126,6 +126,8 @@ export default function PostGigScreen() {
                   <Pressable
                     key={cat}
                     onPress={() => setCategory(cat)}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: active }}
                     hitSlop={4}
                     style={styles.story}>
                     <View
@@ -212,6 +214,7 @@ export default function PostGigScreen() {
           <Pressable
             disabled={!canSubmit}
             onPress={handleSubmit}
+            accessibilityRole="button"
             style={({ pressed }) => [
               styles.cta,
               {
@@ -224,7 +227,10 @@ export default function PostGigScreen() {
             </ThemedText>
           </Pressable>
 
-          <Pressable onPress={() => router.back()} style={styles.cancelBtn}>
+          <Pressable
+            onPress={() => router.back()}
+            accessibilityRole="button"
+            style={styles.cancelBtn}>
             <ThemedText style={[styles.cancelText, { color: c.textMuted }]} type="mono">
               cancel
             </ThemedText>
@@ -285,6 +291,8 @@ export function PostAsToggle({
             <Pressable
               key={opt.label}
               onPress={() => onChange(opt.value)}
+              accessibilityRole="button"
+              accessibilityState={{ selected: active }}
               style={styles.segment}>
               <ThemedText
                 style={[

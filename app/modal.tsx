@@ -74,6 +74,7 @@ export default function MeModal() {
           <NamePlaque size="sm" />
           <Pressable
             onPress={() => router.back()}
+            accessibilityRole="button"
             hitSlop={10}
             style={({ pressed }) => [styles.closeBtn, { opacity: pressed ? 0.5 : 1 }]}>
             <ThemedText style={[styles.closeText, { color: c.textMuted }]} type="mono">
@@ -118,6 +119,7 @@ export default function MeModal() {
                 <Pressable
                   key={`${l.url}-${i}`}
                   onPress={() => openLink(l.url)}
+                  accessibilityRole="button"
                   style={({ pressed }) => [
                     styles.linkRow,
                     {
@@ -196,6 +198,7 @@ export default function MeModal() {
           </ThemedText>
           <Pressable
             onPress={() => router.push('/legal')}
+            accessibilityRole="button"
             style={({ pressed }) => [
               styles.legalRow,
               { borderBottomColor: c.border, opacity: pressed ? 0.5 : 1 },
@@ -212,6 +215,7 @@ export default function MeModal() {
         <View style={styles.actions}>
           <Pressable
             onPress={() => router.push('/profile-setup')}
+            accessibilityRole="button"
             style={({ pressed }) => [
               styles.primaryAction,
               { backgroundColor: c.tint, opacity: pressed ? 0.85 : 1 },
@@ -222,6 +226,7 @@ export default function MeModal() {
           </Pressable>
           <Pressable
             onPress={() => router.push('/settings/account')}
+            accessibilityRole="button"
             style={({ pressed }) => [styles.settingsBtn, { opacity: pressed ? 0.5 : 1 }]}>
             <ThemedText style={[styles.settingsText, { color: c.textSecondary }]} type="mono">
               account settings
@@ -229,6 +234,7 @@ export default function MeModal() {
           </Pressable>
           <Pressable
             onPress={handleSignOut}
+            accessibilityRole="button"
             style={({ pressed }) => [styles.signOutBtn, { opacity: pressed ? 0.5 : 1 }]}>
             <ThemedText style={[styles.signOutText, { color: c.danger }]} type="mono">
               sign out

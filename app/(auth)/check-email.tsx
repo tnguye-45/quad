@@ -37,6 +37,7 @@ export default function CheckEmailScreen() {
 
       <View style={styles.ctaBlock}>
         <Pressable
+          accessibilityRole="button"
           onPress={() => router.replace('/(auth)/sign-in')}
           style={({ pressed }) => [
             styles.cta,

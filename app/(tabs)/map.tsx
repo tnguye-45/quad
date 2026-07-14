@@ -179,6 +179,8 @@ export default function MapScreen() {
           ]}>
           <Pressable
             onPress={() => router.back()}
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
             hitSlop={10}
             style={({ pressed }) => [styles.backBtn, { opacity: pressed ? 0.5 : 1 }]}>
             <IconSymbol name="chevron.left" size={20} color={c.text} />

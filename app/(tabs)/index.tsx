@@ -1,11 +1,12 @@
 import { router } from 'expo-router';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   FlatList,
   Pressable,
   RefreshControl,
   ScrollView,
   StyleSheet,
+  TextInput,
   View,
 } from 'react-native';
 
@@ -35,13 +36,35 @@ const CATEGORY_EMOJI: Record<CatKey, string> = {
 export default function GigsScreen() {
   const [selected, setSelected] = useState<CatKey>('All');
   const [refreshing, setRefreshing] = useState(false);
+  const [searching, setSearching] = useState(false);
+  const [query, setQuery] = useState('');
   const scheme = useColorScheme() ?? 'light';
   const c = Colors[scheme];
   const { gigs, loading, hydrated, error, refresh, loadMore, hasMore } = usePosts();
 
-  const visible = selected === 'All' ? gigs : gigs.filter((g) => g.category === selected);
+  const trimmedQuery = query.trim().toLowerCase();
+  const visible = useMemo(() => {
+    const byCategory =
+      selected === 'All' ? gigs : gigs.filter((g) => g.category === selected);
+    if (!trimmedQuery) return byCategory;
+    return byCategory.filter((g) =>
+      [g.title, g.where, g.category].some((field) =>
+        field.toLowerCase().includes(trimmedQuery),
+      ),
+    );
+  }, [gigs, selected, trimmedQuery]);
+
   const showLoading = !hydrated && loading && gigs.length === 0;
-  const isEmpty = hydrated && visible.length === 0;
+  // `hydrated` flips true even when the fetch threw, so without the error check
+  // a failed load renders "No gigs yet" directly under the retry row.
+  const isEmpty = hydrated && !error && visible.length === 0;
+
+  function toggleSearch() {
+    setSearching((on) => {
+      if (on) setQuery('');
+      return !on;
+    });
+  }
 
   async function onRefresh() {
     setRefreshing(true);
@@ -65,11 +88,39 @@ export default function GigsScreen() {
           },
           {
             icon: 'magnifyingglass',
-            label: 'Search',
-            onPress: () => {},
+            label: searching ? 'Close search' : 'Search gigs',
+            onPress: toggleSearch,
           },
         ]}
       />
+
+      {searching ? (
+        <View style={[styles.searchRow, { borderBottomColor: c.border }]}>
+          <IconSymbol name="magnifyingglass" size={16} color={c.textMuted} />
+          <TextInput
+            value={query}
+            onChangeText={setQuery}
+            placeholder="search gigs…"
+            placeholderTextColor={c.textMuted}
+            autoFocus
+            autoCapitalize="none"
+            autoCorrect={false}
+            returnKeyType="search"
+            accessibilityLabel="Search gigs"
+            style={[styles.searchInput, { color: c.text }]}
+          />
+          {query.length > 0 ? (
+            <Pressable
+              onPress={() => setQuery('')}
+              accessibilityRole="button"
+              accessibilityLabel="Clear search"
+              hitSlop={8}
+              style={({ pressed }) => [{ opacity: pressed ? 0.5 : 1 }]}>
+              <IconSymbol name="xmark" size={14} color={c.textMuted} />
+            </Pressable>
+          ) : null}
+        </View>
+      ) : null}
 
       <FlatList
         data={visible}
@@ -90,6 +141,9 @@ export default function GigsScreen() {
                   <Pressable
                     key={cat}
                     onPress={() => setSelected(cat)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Filter by ${cat}`}
+                    accessibilityState={{ selected: active }}
                     hitSlop={4}
                     style={styles.story}>
                     <View
@@ -125,18 +179,29 @@ export default function GigsScreen() {
           showLoading ? (
             <SkeletonList count={4} avatarSize={44} />
           ) : isEmpty ? (
-            <EmptyState
-              c={c}
-              glyph="briefcase"
-              title="No gigs yet"
-              body={
-                selected === 'All'
-                  ? 'Be the first to post a gig — moving help, tutoring, rides…'
-                  : `No ${selected.toLowerCase()} gigs in the feed yet.`
-              }
-              ctaLabel="Post a gig"
-              onPress={() => router.push('/post-gig' as never)}
-            />
+            trimmedQuery ? (
+              <EmptyState
+                c={c}
+                glyph="magnifyingglass"
+                title="No matches"
+                body={`Nothing matching “${query.trim()}”. Try a different word.`}
+                ctaLabel="Clear search"
+                onPress={() => setQuery('')}
+              />
+            ) : (
+              <EmptyState
+                c={c}
+                glyph="briefcase"
+                title="No gigs yet"
+                body={
+                  selected === 'All'
+                    ? 'Be the first to post a gig — moving help, tutoring, rides…'
+                    : `No ${selected.toLowerCase()} gigs in the feed yet.`
+                }
+                ctaLabel="Post a gig"
+                onPress={() => router.push('/post-gig' as never)}
+              />
+            )
           ) : null
         }
         contentContainerStyle={styles.scroll}
@@ -171,7 +236,9 @@ function GigRow({ gig, c }: { gig: Gig; c: (typeof Colors)['light'] }) {
         styles.row,
         { borderBottomColor: c.border, opacity: pressed ? 0.5 : 1 },
       ]}
-      onPress={() => router.push({ pathname: '/gig/[id]', params: { id: gig.id } })}>
+      onPress={() => router.push({ pathname: '/gig/[id]', params: { id: gig.id } })}
+      accessibilityRole="button"
+      accessibilityLabel={`Gig: ${gig.title}`}>
       <Avatar uri={avatarUri} initials={initials} size={44} textSize={13} />
 
       <View style={styles.rowMain}>
@@ -229,6 +296,7 @@ function EmptyState({
       </ThemedText>
       <Pressable
         onPress={onPress}
+        accessibilityRole="button"
         style={({ pressed }) => [
           styles.emptyCta,
           { backgroundColor: c.tint, opacity: pressed ? 0.8 : 1 },
@@ -253,6 +321,7 @@ function RetryRow({
   return (
     <Pressable
       onPress={onRetry}
+      accessibilityRole="button"
       style={({ pressed }) => [
         styles.retryRow,
         { borderColor: c.border, opacity: pressed ? 0.6 : 1 },
@@ -270,6 +339,19 @@ const styles = StyleSheet.create({
   },
   scroll: {
     paddingBottom: 20,
+  },
+  searchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 20,
+    paddingBottom: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 15,
+    paddingVertical: 4,
   },
   storyRow: {
     paddingHorizontal: 20,
@@ -379,7 +461,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
     textAlign: 'center',
-    color: '#5D6B85',
   },
   emptyCta: {
     paddingHorizontal: 22,

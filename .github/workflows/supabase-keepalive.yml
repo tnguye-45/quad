@@ -5,9 +5,9 @@ name: Supabase keep-alive
 # NOTE: scheduled pings are an unofficial workaround — not guaranteed by Supabase.
 # For anything user-facing, upgrade to Pro (paid projects never auto-pause).
 #
-# Requires one repo secret: SUPABASE_ANON_KEY
-#   GitHub repo -> Settings -> Secrets and variables -> Actions -> New repository secret
-#   (value = EXPO_PUBLIC_SUPABASE_ANON_KEY from your local .env)
+# Uses the same repo secrets the deploy workflow already sets, so there is
+# nothing extra to configure and no hardcoded project ref to drift out of sync:
+#   EXPO_PUBLIC_SUPABASE_URL, EXPO_PUBLIC_SUPABASE_ANON_KEY
 
 on:
   schedule:
@@ -20,9 +20,14 @@ jobs:
     steps:
       - name: Ping Supabase REST API
         env:
-          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_ANON_KEY }}
         run: |
-          URL="https://anoosbiuaggassedukzt.supabase.co/rest/v1/gigs?select=id&limit=1"
+          if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_ANON_KEY" ]; then
+            echo "Missing EXPO_PUBLIC_SUPABASE_URL or EXPO_PUBLIC_SUPABASE_ANON_KEY secret" >&2
+            exit 1
+          fi
+          URL="${SUPABASE_URL%/}/rest/v1/gigs?select=id&limit=1"
           CODE=$(curl -s -o /dev/null -w '%{http_code}' "$URL" -H "apikey: $SUPABASE_ANON_KEY")
           echo "Supabase responded HTTP $CODE"
           # 2xx/3xx = healthy. Fail the job on anything else so you get notified.

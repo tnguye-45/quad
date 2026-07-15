@@ -35,4 +35,4 @@ If we change this policy, we'll update the effective date above and notify you i
 
 ## Contact
 
-For privacy questions or data-export requests, email the team at nguyen.ke.thien.0507@gmail.com.
+For privacy questions or data-export requests, email the team at quadcampusapp@gmail.com.

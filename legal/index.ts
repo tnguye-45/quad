@@ -44,7 +44,7 @@ If we change this policy, we'll update the effective date above and notify you i
 
 ## Contact
 
-For privacy questions or data-export requests, email the team at nguyen.ke.thien.0507@gmail.com.
+For privacy questions or data-export requests, email the team at quadcampusapp@gmail.com.
 `;
 
 export const TOS_MARKDOWN = `# Terms of Service
@@ -91,5 +91,5 @@ We may update these terms; if we do, we'll notify you in-app before the changes 
 
 ## Contact
 
-For questions, email the team at nguyen.ke.thien.0507@gmail.com.
+For questions, email the team at quadcampusapp@gmail.com.
 `;

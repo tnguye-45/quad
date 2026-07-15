@@ -42,4 +42,4 @@ We may update these terms; if we do, we'll notify you in-app before the changes 
 
 ## Contact
 
-For questions, email the team at nguyen.ke.thien.0507@gmail.com.
+For questions, email the team at quadcampusapp@gmail.com.

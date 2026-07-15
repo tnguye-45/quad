@@ -9,8 +9,7 @@
 
 export const PRIVACY_MARKDOWN = `# Privacy Policy
 
-**Effective date:** TBD before launch.
-**Status:** Placeholder — final wording in progress with legal review.
+**Effective date:** July 15, 2026.
 
 quad is a Notre Dame student community app. This document describes what we collect and how we use it.
 
@@ -39,15 +38,18 @@ quad is a Notre Dame student community app. This document describes what we coll
 
 You can delete your account at any time from Account settings → Delete my account. This removes your profile, posts, hangouts, voices, push tokens, and messages you sent. Messages others sent to you remain in those conversations for the other party's history.
 
+## Changes
+
+If we change this policy, we'll update the effective date above and notify you in-app before the changes take effect.
+
 ## Contact
 
-For privacy questions or data-export requests, email the team at TBD.
+For privacy questions or data-export requests, email the team at nguyen.ke.thien.0507@gmail.com.
 `;
 
 export const TOS_MARKDOWN = `# Terms of Service
 
-**Effective date:** TBD before launch.
-**Status:** Placeholder — final wording in progress with legal review.
+**Effective date:** July 15, 2026.
 
 By signing up for quad you agree to the following.
 
@@ -79,11 +81,15 @@ quad is provided "as is." We don't guarantee gigs will be filled, hangouts will 
 
 To the extent permitted by law, quad is not liable for any damages arising from your use of the app, including disputes between you and another student.
 
+## Governing law
+
+These terms are governed by the laws of the State of Indiana, without regard to its conflict-of-law rules. Any dispute arising from these terms or your use of quad will be resolved in the state or federal courts located in St. Joseph County, Indiana.
+
 ## Changes
 
 We may update these terms; if we do, we'll notify you in-app before the changes take effect.
 
 ## Contact
 
-For questions, email the team at TBD.
+For questions, email the team at nguyen.ke.thien.0507@gmail.com.
 `;

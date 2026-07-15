@@ -1,7 +1,6 @@
 # Privacy Policy
 
-**Effective date:** TBD before launch.
-**Status:** Placeholder — final wording in progress with legal review.
+**Effective date:** July 15, 2026.
 
 quad is a Notre Dame student community app. This document describes what we collect and how we use it.
 
@@ -30,6 +29,10 @@ quad is a Notre Dame student community app. This document describes what we coll
 
 You can delete your account at any time from **Account settings → Delete my account**. This removes your profile, posts, hangouts, voices, push tokens, and messages you sent. Messages others sent to you remain in those conversations for the other party's history.
 
+## Changes
+
+If we change this policy, we'll update the effective date above and notify you in-app before the changes take effect.
+
 ## Contact
 
-For privacy questions or data-export requests, email the team at TBD.
+For privacy questions or data-export requests, email the team at nguyen.ke.thien.0507@gmail.com.

@@ -1,7 +1,6 @@
 # Terms of Service
 
-**Effective date:** TBD before launch.
-**Status:** Placeholder — final wording in progress with legal review.
+**Effective date:** July 15, 2026.
 
 By signing up for quad you agree to the following.
 
@@ -33,10 +32,14 @@ quad is provided "as is." We don't guarantee gigs will be filled, hangouts will 
 
 To the extent permitted by law, quad is not liable for any damages arising from your use of the app, including disputes between you and another student.
 
+## Governing law
+
+These terms are governed by the laws of the State of Indiana, without regard to its conflict-of-law rules. Any dispute arising from these terms or your use of quad will be resolved in the state or federal courts located in St. Joseph County, Indiana.
+
 ## Changes
 
 We may update these terms; if we do, we'll notify you in-app before the changes take effect.
 
 ## Contact
 
-For questions, email the team at TBD.
+For questions, email the team at nguyen.ke.thien.0507@gmail.com.

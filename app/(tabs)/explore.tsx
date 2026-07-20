@@ -80,7 +80,7 @@ export default function HangoutsScreen() {
             Obsidian map
           </ThemedText>
           <ThemedText style={[styles.networkBody, { color: c.textSecondary }]}>
-            see who overlaps with you by dorm, major, year, or links
+            see who overlaps with you by dorm, major, year, hangouts, and gigs
           </ThemedText>
         </View>
         <IconSymbol name="chevron.right" size={16} color={c.textMuted} />

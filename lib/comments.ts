@@ -16,39 +16,47 @@ export type Comment = {
   postedAt: number;
 };
 
-type ProfileEmbed = {
-  display_name: string | null;
-  initials: string | null;
-  avatar_url: string | null;
-} | null;
-
+// All comment READS go through the comments_feed security-barrier view (0027):
+// author columns arrive already nulled for other people's anonymous comments,
+// and the two-way block filter is applied server-side. The `anonymous` checks
+// in the mapper are display sugar, not the defense.
 type CommentRow = {
   id: string;
   target_type: CommentTargetType;
   target_id: string;
-  author_id: string;
+  author_id: string | null;
   anonymous: boolean;
   body: string;
   created_at: string;
-  author?: ProfileEmbed;
+  author_display_name: string | null;
+  author_initials: string | null;
+  author_avatar_url: string | null;
 };
 
 const COMMENT_SELECT =
   'id, target_type, target_id, author_id, anonymous, body, created_at, ' +
-  'author:profiles!comments_author_id_fkey(display_name, initials, avatar_url)';
+  'author_display_name, author_initials, author_avatar_url';
 
 function fromRow(row: CommentRow): Comment {
   return {
     id: row.id,
     body: row.body,
     anonymous: row.anonymous,
-    authorId: row.author_id,
-    authorName: row.anonymous ? null : (row.author?.display_name ?? null),
-    authorInitials: row.anonymous ? null : (row.author?.initials ?? null),
-    authorAvatarUrl: row.anonymous ? null : (row.author?.avatar_url ?? null),
+    // Null for someone else's anonymous comment — '' keeps the type stable and
+    // never matches a real user id in "my comment" checks.
+    authorId: row.author_id ?? '',
+    authorName: row.anonymous ? null : row.author_display_name,
+    authorInitials: row.anonymous ? null : row.author_initials,
+    authorAvatarUrl: row.anonymous ? null : row.author_avatar_url,
     postedAt: new Date(row.created_at).getTime(),
   };
 }
+
+// Channel topics must be unique per hook instance: realtime-js hands back the
+// EXISTING channel for a duplicate topic, so two stacked detail screens on the
+// same target would share one channel and either screen's cleanup would kill
+// the other's subscription.
+let channelSeq = 0;
 
 export function useComments(
   targetType: CommentTargetType | undefined,
@@ -57,7 +65,8 @@ export function useComments(
   comments: Comment[];
   loading: boolean;
   error: string | null;
-  send: (body: string, opts?: { anonymous?: boolean }) => Promise<void>;
+  /** Resolves true when the comment reached the server. */
+  send: (body: string, opts?: { anonymous?: boolean }) => Promise<boolean>;
   remove: (commentId: string) => Promise<void>;
   refresh: () => Promise<void>;
 } {
@@ -85,7 +94,7 @@ export function useComments(
     setError(null);
     try {
       const { data, error: e } = await supabase
-        .from('comments')
+        .from('comments_feed')
         .select(COMMENT_SELECT)
         .eq('target_type', targetType)
         .eq('target_id', targetId)
@@ -109,7 +118,7 @@ export function useComments(
     // drop locally on delete. Filter scopes the channel to this single target
     // so other detail screens don't get cross-talk.
     const channel = supabase
-      .channel(`comments:${targetType}:${targetId}`)
+      .channel(`comments:${targetType}:${targetId}:${++channelSeq}`)
       .on(
         'postgres_changes',
         {
@@ -119,10 +128,12 @@ export function useComments(
           filter: `target_id=eq.${targetId}`,
         },
         async (payload) => {
-          const row = payload.new as CommentRow;
+          const row = payload.new as { id: string; target_type: CommentTargetType };
           if (row.target_type !== targetType) return;
+          // Refetch through the view: masked author + block filter applied —
+          // a blocked author's comment comes back as no row and is dropped.
           const { data } = await supabase
-            .from('comments')
+            .from('comments_feed')
             .select(COMMENT_SELECT)
             .eq('id', row.id)
             .maybeSingle();
@@ -155,10 +166,10 @@ export function useComments(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [realSession, targetType, targetId, session?.user.id]);
 
-  const send = async (body: string, opts?: { anonymous?: boolean }) => {
-    if (!realSession || !targetType || !targetId) return;
+  const send = async (body: string, opts?: { anonymous?: boolean }): Promise<boolean> => {
+    if (!realSession || !targetType || !targetId) return false;
     const trimmed = body.trim();
-    if (!trimmed) return;
+    if (!trimmed) return false;
     const { error: e } = await supabase.from('comments').insert({
       target_type: targetType,
       target_id: targetId,
@@ -169,7 +180,9 @@ export function useComments(
     if (e) {
       console.warn('[comments] insert failed:', e.message);
       setError(e.message);
+      return false;
     }
+    return true;
   };
 
   const remove = async (commentId: string) => {

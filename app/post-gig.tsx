@@ -60,7 +60,7 @@ export default function PostGigScreen() {
     setErr(null);
     setBusy(true);
     try {
-      await addGig({
+      const ok = await addGig({
         title: title.trim(),
         description: description.trim() || undefined,
         payout: `$${Math.round(payoutNumber)}`,
@@ -72,6 +72,12 @@ export default function PostGigScreen() {
         posterInitials: profile?.initials ?? null,
         posterAvatarUrl: profile?.avatar_url ?? null,
       });
+      if (!ok) {
+        // The store swallows insert errors into its own state; keep the compose
+        // screen open with the typed content instead of popping as if it saved.
+        setErr("Couldn't post your gig. Check your connection and try again.");
+        return;
+      }
       router.back();
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : 'Failed to post.');
@@ -107,6 +113,7 @@ export default function PostGigScreen() {
               onChangeText={setTitle}
               placeholder="Help move a couch up 3 flights"
               placeholderTextColor={c.textMuted}
+              maxLength={120}
               style={[styles.input, { color: c.text }]}
             />
             <View style={[styles.underline, { backgroundColor: c.border }]} />
@@ -179,6 +186,7 @@ export default function PostGigScreen() {
                 onChangeText={setWhere}
                 placeholder="Dillon Hall"
                 placeholderTextColor={c.textMuted}
+                maxLength={80}
                 style={[styles.input, { color: c.text }]}
               />
               <View style={[styles.underline, { backgroundColor: c.border }]} />

@@ -89,8 +89,11 @@ export default function MessagesScreen() {
     ? conversations.filter((co) => co.unread || (unreadByConversation[co.id] ?? 0) > 0).length
     : devItems.filter((co) => co.unread).length;
 
-  const activeNow = useReal
-    ? items.slice(0, 4)
+  // No real presence exists yet, so real sessions get no "active now" row —
+  // the old items.slice(0, 4) painted a green dot on whoever happened to be
+  // first four, which is a lie. Dev mode keeps its explicitly-flagged demo row.
+  const activeNow: Item[] = useReal
+    ? []
     : devItems.filter((co) => co.active).slice(0, 6);
 
   const showLoading = useReal && loading && conversations.length === 0;

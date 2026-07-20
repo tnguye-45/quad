@@ -4,9 +4,10 @@
   "version": "1.0.0",
   "scripts": {
     "start": "expo start",
-    "reset-project": "node ./scripts/reset-project.js",
     "verify-supabase": "node ./scripts/verify-supabase.mjs",
     "set-anon-key": "node ./scripts/set-anon-key.mjs",
+    "check-build-env": "node ./scripts/check-build-env.mjs",
+    "eas-build-pre-install": "node ./scripts/check-build-env.mjs",
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
@@ -54,5 +55,21 @@
     "sharp": "^0.34.5",
     "typescript": "~5.9.2"
   },
-  "private": true
+  "private": true,
+  "description": "A campus-only mobile app for the University of Notre Dame. Students connect to find **gigs** (paid tasks: tutoring, moving, rideshares), **hangouts** (study sessions, pickup basketball, dining hall meetups), and **voices** (an anonymous opinion feed). All gated by `@nd.edu` email.",
+  "directories": {
+    "lib": "lib"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tnguye-45/quad.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/tnguye-45/quad/issues"
+  },
+  "homepage": "https://github.com/tnguye-45/quad#readme"
 }

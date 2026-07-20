@@ -1,3 +1,4 @@
+import { router } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
@@ -47,8 +48,10 @@ export function CommentThread({ targetType, targetId, defaultAnonymous = false }
     if (!canSend) return;
     setSending(true);
     try {
-      await send(draft, { anonymous });
-      setDraft('');
+      // Only clear the draft if the comment actually posted — otherwise a failed
+      // send (offline / RLS denial) would silently erase what the user typed.
+      const ok = await send(draft, { anonymous });
+      if (ok) setDraft('');
     } finally {
       setSending(false);
     }
@@ -82,6 +85,8 @@ export function CommentThread({ targetType, targetId, defaultAnonymous = false }
               comment={cmt}
               isMine={!!myId && cmt.authorId === myId}
               onDelete={() => remove(cmt.id)}
+              targetType={targetType}
+              targetId={targetId}
               c={c}
             />
           ))}
@@ -176,11 +181,15 @@ function CommentRow({
   comment,
   isMine,
   onDelete,
+  targetType,
+  targetId,
   c,
 }: {
   comment: Comment;
   isMine: boolean;
   onDelete: () => void;
+  targetType: CommentTargetType;
+  targetId: string;
   c: (typeof Colors)['light'];
 }) {
   const displayName = comment.anonymous ? 'Anonymous' : comment.authorName ?? 'Unknown';
@@ -207,7 +216,30 @@ function CommentRow({
                 delete
               </ThemedText>
             </Pressable>
-          ) : null}
+          ) : (
+            // The reports table has no `comment` kind, so a reported comment is
+            // filed against its parent post with the comment author attached —
+            // the moderator sees which thread and which user.
+            <Pressable
+              onPress={() =>
+                router.push({
+                  pathname: '/report',
+                  params: {
+                    type: targetType,
+                    id: targetId,
+                    ...(comment.authorId ? { userId: comment.authorId } : {}),
+                  },
+                })
+              }
+              accessibilityRole="button"
+              accessibilityLabel="Report this comment"
+              hitSlop={6}
+              style={({ pressed }) => [styles.deleteBtn, { opacity: pressed ? 0.5 : 1 }]}>
+              <ThemedText style={[styles.deleteText, { color: c.textMuted }]} type="mono">
+                report
+              </ThemedText>
+            </Pressable>
+          )}
         </View>
         <ThemedText style={[styles.commentText, { color: c.text }]}>{comment.body}</ThemedText>
       </View>

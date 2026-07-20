@@ -1,5 +1,4 @@
 import { router, useLocalSearchParams } from 'expo-router';
-import { useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { CommentThread } from '@/components/comment-thread';
@@ -13,9 +12,9 @@ import { usePosts, VOICE_TOPIC_EMOJI } from '@/lib/posts-store';
 export default function VoiceDetailScreen() {
   const c = Colors[useColorScheme() ?? 'light'];
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { voices, voteVoice, hydrated } = usePosts();
+  const { voices, voteVoice, myVotes, hydrated } = usePosts();
   const voice = voices.find((v) => v.id === id);
-  const [vote, setVote] = useState<0 | 1 | -1>(0);
+  const vote: 0 | 1 | -1 = (id && myVotes[id]) || 0;
 
   // Until the store hydrates, a miss means "not loaded yet", not "deleted" —
   // deep links land here before the first fetch resolves.
@@ -59,21 +58,8 @@ export default function VoiceDetailScreen() {
   }
 
   const score = voice.votes;
-  const press = (dir: 1 | -1) => () => {
-    const next = vote === dir ? 0 : dir;
-    const delta = (next - vote) as 1 | -1 | 0 | 2 | -2;
-    if (delta === 0) return;
-    if (delta === 2) {
-      voteVoice(voice.id, 1);
-      voteVoice(voice.id, 1);
-    } else if (delta === -2) {
-      voteVoice(voice.id, -1);
-      voteVoice(voice.id, -1);
-    } else {
-      voteVoice(voice.id, delta as 1 | -1);
-    }
-    setVote(next);
-  };
+  // The store owns the vote state and toggles when the active arrow is re-tapped.
+  const press = (dir: 1 | -1) => () => voteVoice(voice.id, dir);
   const scoreColor =
     vote === 1 ? c.accent : vote === -1 ? c.textSecondary : c.textSecondary;
 
@@ -84,15 +70,37 @@ export default function VoiceDetailScreen() {
           <ThemedText style={[styles.eyebrow, { color: c.accent }]} type="mono">
             voice · {voice.topic.toLowerCase()}
           </ThemedText>
-          <Pressable
-            onPress={() => router.back()}
-            accessibilityRole="button"
-            hitSlop={10}
-            style={({ pressed }) => [{ opacity: pressed ? 0.5 : 1 }]}>
-            <ThemedText style={[styles.closeText, { color: c.textMuted }]} type="mono">
-              close
-            </ThemedText>
-          </Pressable>
+          <View style={styles.brandActions}>
+            <Pressable
+              onPress={() =>
+                router.push({
+                  pathname: '/report',
+                  params: {
+                    type: 'voice',
+                    id: voice.id,
+                    // 'seed' is a dev-only placeholder, not a real uuid.
+                    ...(voice.ownerId !== 'seed' ? { userId: voice.ownerId } : {}),
+                  },
+                })
+              }
+              accessibilityRole="button"
+              accessibilityLabel="Report this voice"
+              hitSlop={10}
+              style={({ pressed }) => [{ opacity: pressed ? 0.5 : 1 }]}>
+              <ThemedText style={[styles.closeText, { color: c.textMuted }]} type="mono">
+                report
+              </ThemedText>
+            </Pressable>
+            <Pressable
+              onPress={() => router.back()}
+              accessibilityRole="button"
+              hitSlop={10}
+              style={({ pressed }) => [{ opacity: pressed ? 0.5 : 1 }]}>
+              <ThemedText style={[styles.closeText, { color: c.textMuted }]} type="mono">
+                close
+              </ThemedText>
+            </Pressable>
+          </View>
         </View>
 
         <View style={styles.hero}>
@@ -181,6 +189,11 @@ const styles = StyleSheet.create({
     fontSize: 10,
     letterSpacing: 1.2,
     textTransform: 'uppercase',
+  },
+  brandActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 20,
   },
   hero: {
     paddingHorizontal: 24,

@@ -8,8 +8,11 @@ import { ThemedView } from '@/components/themed-view';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 
+// tos.md is the finalized Terms of Service (effective 2026-07-15). Do NOT
+// point at legal/terms.md — that's an orphaned earlier draft with unfilled
+// TODO placeholders.
 const PRIVACY_URL = 'https://github.com/tnguye-45/quad/blob/main/legal/privacy.md';
-const TERMS_URL = 'https://github.com/tnguye-45/quad/blob/main/legal/terms.md';
+const TERMS_URL = 'https://github.com/tnguye-45/quad/blob/main/legal/tos.md';
 
 async function openExternal(url: string) {
   if (Platform.OS === 'web') {
@@ -52,8 +55,8 @@ export default function LegalScreen() {
             Privacy & terms
           </ThemedText>
           <ThemedText style={[styles.tagline, { color: c.textSecondary }]}>
-            Drafts of the documents that govern your use of quad. Both are
-            currently being reviewed and may change before public launch.
+            The documents that govern your use of quad. We&apos;ll note the
+            effective date at the top of each if they change.
           </ThemedText>
         </View>
 

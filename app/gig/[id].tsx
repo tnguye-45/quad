@@ -224,11 +224,33 @@ export default function GigDetailScreen() {
             <ThemedText style={[styles.error, { color: c.danger }]}>{err}</ThemedText>
           ) : null}
 
-          <Pressable onPress={() => router.back()} accessibilityRole="button" style={styles.cancelBtn}>
-            <ThemedText style={[styles.cancelText, { color: c.textMuted }]} type="mono">
-              close
-            </ThemedText>
-          </Pressable>
+          <View style={styles.footerLinks}>
+            <Pressable
+              onPress={() =>
+                router.push({
+                  pathname: '/report',
+                  params: {
+                    type: 'gig',
+                    id: gig.id,
+                    // 'seed' is a dev-only placeholder, not a real uuid.
+                    ...(gig.ownerId !== 'seed' ? { userId: gig.ownerId } : {}),
+                  },
+                })
+              }
+              accessibilityRole="button"
+              accessibilityLabel="Report this gig"
+              hitSlop={8}
+              style={styles.cancelBtn}>
+              <ThemedText style={[styles.cancelText, { color: c.textMuted }]} type="mono">
+                report
+              </ThemedText>
+            </Pressable>
+            <Pressable onPress={() => router.back()} accessibilityRole="button" style={styles.cancelBtn}>
+              <ThemedText style={[styles.cancelText, { color: c.textMuted }]} type="mono">
+                close
+              </ThemedText>
+            </Pressable>
+          </View>
         </View>
 
         <View style={styles.commentsHolder}>
@@ -346,6 +368,11 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   error: { fontSize: 13, lineHeight: 18, textAlign: 'center' },
+  footerLinks: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 32,
+  },
   cancelBtn: { paddingVertical: 8, alignItems: 'center' },
   cancelText: {
     fontSize: 11,

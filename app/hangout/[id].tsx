@@ -129,15 +129,37 @@ export default function HangoutDetailScreen() {
           <ThemedText style={[styles.eyebrow, { color: c.accent }]} type="mono">
             hangout · {hangout.vibe.toLowerCase()}
           </ThemedText>
-          <Pressable
-            onPress={() => router.back()}
-            accessibilityRole="button"
-            hitSlop={10}
-            style={({ pressed }) => [{ opacity: pressed ? 0.5 : 1 }]}>
-            <ThemedText style={[styles.closeText, { color: c.textMuted }]} type="mono">
-              close
-            </ThemedText>
-          </Pressable>
+          <View style={styles.brandActions}>
+            <Pressable
+              onPress={() =>
+                router.push({
+                  pathname: '/report',
+                  params: {
+                    type: 'hangout',
+                    id: hangout.id,
+                    // 'seed' is a dev-only placeholder, not a real uuid.
+                    ...(hangout.ownerId !== 'seed' ? { userId: hangout.ownerId } : {}),
+                  },
+                })
+              }
+              accessibilityRole="button"
+              accessibilityLabel="Report this hangout"
+              hitSlop={10}
+              style={({ pressed }) => [{ opacity: pressed ? 0.5 : 1 }]}>
+              <ThemedText style={[styles.closeText, { color: c.textMuted }]} type="mono">
+                report
+              </ThemedText>
+            </Pressable>
+            <Pressable
+              onPress={() => router.back()}
+              accessibilityRole="button"
+              hitSlop={10}
+              style={({ pressed }) => [{ opacity: pressed ? 0.5 : 1 }]}>
+              <ThemedText style={[styles.closeText, { color: c.textMuted }]} type="mono">
+                close
+              </ThemedText>
+            </Pressable>
+          </View>
         </View>
 
         <View style={styles.hero}>
@@ -256,6 +278,11 @@ const styles = StyleSheet.create({
     fontSize: 10,
     letterSpacing: 1.2,
     textTransform: 'uppercase',
+  },
+  brandActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 20,
   },
   hero: {
     paddingTop: 14,

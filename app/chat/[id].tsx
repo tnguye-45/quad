@@ -1,7 +1,7 @@
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   ActionSheetIOS,
   Alert,
@@ -27,6 +27,7 @@ import Animated, {
 } from 'react-native-reanimated';
 
 import { Avatar } from '@/components/avatar';
+import { ChatHeaderMenu } from '@/components/chat-header-menu';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { IconSymbol } from '@/components/ui/icon-symbol';
@@ -101,6 +102,7 @@ function Header({
   initials,
   avatarUri,
   online,
+  right,
 }: {
   colors: (typeof Colors)['light'];
   name: string;
@@ -108,6 +110,7 @@ function Header({
   initials?: string;
   avatarUri?: string | null;
   online?: boolean;
+  right?: ReactNode;
 }) {
   return (
     <View style={[styles.header, { borderBottomColor: c.border, backgroundColor: c.background }]}>
@@ -136,6 +139,7 @@ function Header({
           {context.toLowerCase()}
         </ThemedText>
       </View>
+      {right}
     </View>
   );
 }
@@ -173,6 +177,7 @@ function RealChat({
     loading,
     error,
     send,
+    deleteMessages,
     conversation,
     otherReads,
     typing,
@@ -182,7 +187,42 @@ function RealChat({
   const [pendingImage, setPendingImage] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [expandedImage, setExpandedImage] = useState<string | null>(null);
+  // null = normal mode; a Set (even empty) = selection mode.
+  const [selected, setSelected] = useState<Set<string> | null>(null);
+  const selecting = selected !== null;
   const scrollRef = useRef<ScrollView | null>(null);
+
+  function enterSelection(id: string) {
+    setSelected(new Set([id]));
+  }
+  function toggleSelected(id: string) {
+    setSelected((cur) => {
+      if (!cur) return cur;
+      const next = new Set(cur);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+  function confirmDeleteSelected() {
+    if (!selected || selected.size === 0) return;
+    const n = selected.size;
+    Alert.alert(
+      n === 1 ? 'Delete message?' : `Delete ${n} messages?`,
+      'This removes them for everyone in this chat.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            const ok = await deleteMessages([...selected]);
+            if (ok) setSelected(null);
+          },
+        },
+      ],
+    );
+  }
 
   useEffect(() => {
     const t = setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 50);
@@ -294,6 +334,15 @@ function RealChat({
             context={contextLabel}
             initials={partnerInitials}
             avatarUri={partnerAvatarUrl}
+            right={
+              <ChatHeaderMenu
+                conversationId={conversationId}
+                // Only a 1:1 thread has a single counterpart to block; in a
+                // hangout group chat the menu is report-only.
+                otherUserId={otherReads.length === 1 ? otherReads[0].userId : ''}
+                otherUserName={otherReads.length === 1 ? partnerName : undefined}
+              />
+            }
           />
 
           <ScrollView
@@ -335,14 +384,40 @@ function RealChat({
                         {formatStamp(m.sent_at)}
                       </ThemedText>
                     ) : null}
-                    <View style={[styles.bubbleRow, isMine && styles.bubbleRowRight]}>
+                    <Pressable
+                      onLongPress={isMine ? () => enterSelection(m.id) : undefined}
+                      onPress={
+                        selecting && isMine ? () => toggleSelected(m.id) : undefined
+                      }
+                      accessibilityHint={
+                        isMine && !selecting ? 'Long press to select for deletion' : undefined
+                      }
+                      style={[styles.bubbleRow, isMine && styles.bubbleRowRight]}>
+                      {selecting && isMine ? (
+                        <View style={styles.selectDotWrap}>
+                          <IconSymbol
+                            name={selected!.has(m.id) ? 'checkmark.circle.fill' : 'circle'}
+                            size={20}
+                            color={selected!.has(m.id) ? c.tint : c.textMuted}
+                          />
+                        </View>
+                      ) : null}
                       <MessageBubble
                         message={m}
                         isMine={isMine}
                         c={c}
-                        onTapImage={(uri) => setExpandedImage(uri)}
+                        onTapImage={(uri) => {
+                          if (selecting) {
+                            if (isMine) toggleSelected(m.id);
+                          } else {
+                            setExpandedImage(uri);
+                          }
+                        }}
+                        onLongPressImage={
+                          isMine ? () => enterSelection(m.id) : undefined
+                        }
                       />
-                    </View>
+                    </Pressable>
                     {isLatestMine ? (
                       <ReadReceiptRow
                         message={m}
@@ -399,15 +474,24 @@ function RealChat({
             </View>
           ) : null}
 
-          <InputBar
-            draft={draft}
-            setDraft={handleDraftChange}
-            onSend={handleSend}
-            onAttach={openAttachSheet}
-            colors={c}
-            disabled={uploading}
-            sendableOverride={!!pendingImage}
-          />
+          {selecting ? (
+            <SelectionBar
+              count={selected!.size}
+              onCancel={() => setSelected(null)}
+              onDelete={confirmDeleteSelected}
+              colors={c}
+            />
+          ) : (
+            <InputBar
+              draft={draft}
+              setDraft={handleDraftChange}
+              onSend={handleSend}
+              onAttach={openAttachSheet}
+              colors={c}
+              disabled={uploading}
+              sendableOverride={!!pendingImage}
+            />
+          )}
         </ThemedView>
       </KeyboardAvoidingView>
 
@@ -475,11 +559,15 @@ function MessageBubble({
   isMine,
   c,
   onTapImage,
+  onLongPressImage,
 }: {
   message: Message;
   isMine: boolean;
   c: (typeof Colors)['light'];
   onTapImage: (uri: string) => void;
+  // Image bubbles have their own inner Pressable which swallows the row's
+  // long-press, so selection long-press has to be wired here too.
+  onLongPressImage?: () => void;
 }) {
   const hasImage = !!message.image_url;
   const hasText = !!message.body && message.body.length > 0;
@@ -500,6 +588,7 @@ function MessageBubble({
         ]}>
         <Pressable
           onPress={() => onTapImage(message.image_url!)}
+          onLongPress={onLongPressImage}
           accessibilityRole="button"
           accessibilityLabel="View image full size"
           style={({ pressed }) => ({ opacity: pressed ? 0.85 : 1 })}>
@@ -668,12 +757,43 @@ function DevChat({
   conversationId: string;
   colors: (typeof Colors)['light'];
 }) {
-  const { getConversation, sendMessage, markRead } = useDevConversations();
+  const { getConversation, sendMessage, deleteMessages, markRead } = useDevConversations();
   const convo = getConversation(conversationId) as DevConversation | undefined;
   const [draft, setDraft] = useState('');
+  const [selected, setSelected] = useState<Set<string> | null>(null);
+  const selecting = selected !== null;
   const scrollRef = useRef<ScrollView | null>(null);
   const messages = convo?.messages ?? [];
   const isGroup = convo?.kind === 'hangout';
+
+  function toggleSelected(id: string) {
+    setSelected((cur) => {
+      if (!cur) return cur;
+      const next = new Set(cur);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+  function confirmDeleteSelected() {
+    if (!selected || selected.size === 0) return;
+    const n = selected.size;
+    Alert.alert(
+      n === 1 ? 'Delete message?' : `Delete ${n} messages?`,
+      'This removes them for everyone in this chat.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () => {
+            deleteMessages(conversationId, [...selected]);
+            setSelected(null);
+          },
+        },
+      ],
+    );
+  }
 
   // Clear the unread dot once the thread is open.
   useEffect(() => {
@@ -705,6 +825,9 @@ function DevChat({
           context={convo.context}
           initials={convo.initials}
           online={convo.online}
+          // Dev conversations have no real counterpart user — report-only, and
+          // the report screen fakes the submit in dev mode.
+          right={<ChatHeaderMenu conversationId={conversationId} otherUserId="" />}
         />
 
         <ScrollView
@@ -734,7 +857,22 @@ function DevChat({
                     {m.senderName}
                   </ThemedText>
                 ) : null}
-                <View style={[styles.bubbleRow, isMine && styles.bubbleRowRight]}>
+                <Pressable
+                  onLongPress={isMine ? () => setSelected(new Set([m.id])) : undefined}
+                  onPress={selecting && isMine ? () => toggleSelected(m.id) : undefined}
+                  accessibilityHint={
+                    isMine && !selecting ? 'Long press to select for deletion' : undefined
+                  }
+                  style={[styles.bubbleRow, isMine && styles.bubbleRowRight]}>
+                  {selecting && isMine ? (
+                    <View style={styles.selectDotWrap}>
+                      <IconSymbol
+                        name={selected!.has(m.id) ? 'checkmark.circle.fill' : 'circle'}
+                        size={20}
+                        color={selected!.has(m.id) ? c.tint : c.textMuted}
+                      />
+                    </View>
+                  ) : null}
                   <View
                     style={[
                       styles.bubble,
@@ -750,20 +888,77 @@ function DevChat({
                       {m.text}
                     </ThemedText>
                   </View>
-                </View>
+                </Pressable>
               </View>
             );
           })}
         </ScrollView>
 
-        <InputBar
-          draft={draft}
-          setDraft={setDraft}
-          onSend={handleSend}
-          colors={c}
-        />
+        {selecting ? (
+          <SelectionBar
+            count={selected!.size}
+            onCancel={() => setSelected(null)}
+            onDelete={confirmDeleteSelected}
+            colors={c}
+          />
+        ) : (
+          <InputBar
+            draft={draft}
+            setDraft={setDraft}
+            onSend={handleSend}
+            colors={c}
+          />
+        )}
       </ThemedView>
     </KeyboardAvoidingView>
+  );
+}
+
+function SelectionBar({
+  count,
+  onCancel,
+  onDelete,
+  colors: c,
+}: {
+  count: number;
+  onCancel: () => void;
+  onDelete: () => void;
+  colors: (typeof Colors)['light'];
+}) {
+  return (
+    <View
+      style={[
+        styles.selectionBar,
+        { borderTopColor: c.border, backgroundColor: c.background },
+      ]}>
+      <Pressable
+        onPress={onCancel}
+        accessibilityRole="button"
+        accessibilityLabel="Cancel selection"
+        hitSlop={10}
+        style={({ pressed }) => ({ opacity: pressed ? 0.5 : 1 })}>
+        <ThemedText style={[styles.selectionAction, { color: c.textSecondary }]} type="mono">
+          cancel
+        </ThemedText>
+      </Pressable>
+      <ThemedText style={[styles.selectionCount, { color: c.textMuted }]} type="mono">
+        {count} selected
+      </ThemedText>
+      <Pressable
+        onPress={onDelete}
+        disabled={count === 0}
+        accessibilityRole="button"
+        accessibilityLabel={`Delete ${count} selected messages`}
+        accessibilityState={{ disabled: count === 0 }}
+        hitSlop={10}
+        style={({ pressed }) => ({
+          opacity: count === 0 ? 0.35 : pressed ? 0.5 : 1,
+        })}>
+        <ThemedText style={[styles.selectionAction, { color: c.danger }]} type="mono">
+          delete
+        </ThemedText>
+      </Pressable>
+    </View>
   );
 }
 
@@ -929,6 +1124,27 @@ const styles = StyleSheet.create({
     marginBottom: 3,
   },
   bubbleRowRight: { justifyContent: 'flex-end' },
+  selectDotWrap: { alignSelf: 'center', marginRight: 8 },
+  selectionBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 28,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  selectionAction: {
+    fontSize: 11,
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
+    fontWeight: '700',
+  },
+  selectionCount: {
+    fontSize: 10,
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
+  },
   bubble: {
     maxWidth: '78%',
     paddingHorizontal: 14,

@@ -18,7 +18,14 @@ import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useAuth, type ProfileLink } from '@/lib/auth-context';
 import { uploadAvatar } from '@/lib/avatars';
-import { detectPlatform, PLATFORMS, type Platform as LinkPlatform } from '@/lib/profile-links';
+import {
+  detectPlatform,
+  isPaymentLink,
+  paymentHandleFromUrl,
+  paymentUrlFromHandle,
+  PLATFORMS,
+  type Platform as LinkPlatform,
+} from '@/lib/profile-links';
 import { supabase } from '@/lib/supabase';
 
 const YEARS = [1, 2, 3, 4, 5] as const;
@@ -28,6 +35,26 @@ function computeInitials(name: string): string {
   if (parts.length === 0) return '';
   if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
+// Payment links live in the same `links` array as everything else, but the UI
+// gives them dedicated handle inputs — split them out for editing and merge
+// them back on save.
+function splitLinks(all: ProfileLink[]): {
+  social: ProfileLink[];
+  venmo: string;
+  cashapp: string;
+} {
+  const social: ProfileLink[] = [];
+  let venmo = '';
+  let cashapp = '';
+  for (const l of all) {
+    const p = detectPlatform(l.url);
+    if (p?.id === 'venmo') venmo = paymentHandleFromUrl(l.url) ?? '';
+    else if (p?.id === 'cashapp') cashapp = paymentHandleFromUrl(l.url) ?? '';
+    else social.push(l);
+  }
+  return { social, venmo, cashapp };
 }
 
 function isValidUrl(value: string): boolean {
@@ -49,7 +76,11 @@ export default function ProfileSetupScreen() {
   const [major, setMajor] = useState(profile?.major ?? '');
   const [dorm, setDorm] = useState(profile?.dorm ?? '');
   const [bio, setBio] = useState(profile?.bio ?? '');
-  const [links, setLinks] = useState<ProfileLink[]>(profile?.links ?? []);
+  const [links, setLinks] = useState<ProfileLink[]>(
+    () => splitLinks(profile?.links ?? []).social,
+  );
+  const [venmo, setVenmo] = useState(() => splitLinks(profile?.links ?? []).venmo);
+  const [cashapp, setCashapp] = useState(() => splitLinks(profile?.links ?? []).cashapp);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(profile?.avatar_url ?? null);
   const [avatarBusy, setAvatarBusy] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -62,7 +93,10 @@ export default function ProfileSetupScreen() {
     setMajor((cur) => cur || profile.major || '');
     setDorm((cur) => cur || profile.dorm || '');
     setBio((cur) => cur || profile.bio || '');
-    setLinks((cur) => (cur.length > 0 ? cur : profile.links));
+    const split = splitLinks(profile.links);
+    setLinks((cur) => (cur.length > 0 ? cur : split.social));
+    setVenmo((cur) => cur || split.venmo);
+    setCashapp((cur) => cur || split.cashapp);
     setAvatarUrl((cur) => cur ?? profile.avatar_url);
   }, [profile]);
 
@@ -143,12 +177,31 @@ export default function ProfileSetupScreen() {
 
     const cleanedLinks: ProfileLink[] = links
       .map((l) => ({ label: l.label.trim(), url: l.url.trim() }))
-      .filter((l) => l.label && l.url);
+      // Payment links have their own inputs below — keep them out of the
+      // social list so they can't be saved twice.
+      .filter((l) => l.label && l.url && !isPaymentLink(l.url));
 
     const badLink = cleanedLinks.find((l) => !isValidUrl(l.url));
     if (badLink) {
       setErr(`"${badLink.label}" doesn't look like a valid URL.`);
       return;
+    }
+
+    if (venmo.trim()) {
+      const url = paymentUrlFromHandle('venmo', venmo);
+      if (!url) {
+        setErr("That Venmo handle doesn't look right — letters, numbers, dashes and underscores only.");
+        return;
+      }
+      cleanedLinks.push({ label: 'Venmo', url });
+    }
+    if (cashapp.trim()) {
+      const url = paymentUrlFromHandle('cashapp', cashapp);
+      if (!url) {
+        setErr("That cashtag doesn't look right — it should look like $yourname.");
+        return;
+      }
+      cleanedLinks.push({ label: 'Cash App', url });
     }
 
     setBusy(true);
@@ -159,9 +212,13 @@ export default function ProfileSetupScreen() {
       return;
     }
 
+    // Upsert, not update: if the signup trigger ever failed to create the
+    // profiles row, update() matches zero rows and "succeeds" — the guard then
+    // sees no display_name and bounces the user back here forever.
     const { error } = await supabase
       .from('profiles')
-      .update({
+      .upsert({
+        id: session.user.id,
         display_name: displayName.trim(),
         initials: computeInitials(displayName),
         year,
@@ -169,15 +226,24 @@ export default function ProfileSetupScreen() {
         dorm: dorm.trim() || null,
         bio: bio.trim() || null,
         links: cleanedLinks,
-      })
-      .eq('id', session.user.id);
+      });
     if (error) {
       setBusy(false);
       setErr(error.message);
       return;
     }
+    // Capture edit-vs-first-run BEFORE refreshProfile updates the closure.
+    const wasEditing = Boolean(profile?.display_name);
     await refreshProfile();
     setBusy(false);
+    // On the real backend the root route guard only redirects away from
+    // auth/splash/welcome — it never moves us off profile-setup — so a
+    // successful save must navigate explicitly or the user is stranded here.
+    if (wasEditing) {
+      router.back();
+    } else {
+      router.replace('/(tabs)');
+    }
   }
 
   const isEditing = Boolean(profile?.display_name);
@@ -336,6 +402,43 @@ export default function ProfileSetupScreen() {
 
           <View style={styles.fieldGroup}>
             <ThemedText style={[styles.label, { color: c.textMuted }]} type="mono">
+              payments
+            </ThemedText>
+            <ThemedText style={[styles.emptyHint, { color: c.textSecondary }]}>
+              So people can pay you for gigs. Shown on your profile.
+            </ThemedText>
+            <View style={styles.payRow}>
+              <ThemedText style={[styles.paySigil, { color: c.textMuted }]}>💸</ThemedText>
+              <TextInput
+                value={venmo}
+                onChangeText={setVenmo}
+                placeholder="@your-venmo"
+                placeholderTextColor={c.textMuted}
+                autoCapitalize="none"
+                autoCorrect={false}
+                accessibilityLabel="Venmo handle"
+                style={[styles.input, styles.payInput, { color: c.text }]}
+              />
+            </View>
+            <View style={[styles.underline, { backgroundColor: c.border }]} />
+            <View style={styles.payRow}>
+              <ThemedText style={[styles.paySigil, { color: c.textMuted }]}>💵</ThemedText>
+              <TextInput
+                value={cashapp}
+                onChangeText={setCashapp}
+                placeholder="$yourcashtag"
+                placeholderTextColor={c.textMuted}
+                autoCapitalize="none"
+                autoCorrect={false}
+                accessibilityLabel="Cash App cashtag"
+                style={[styles.input, styles.payInput, { color: c.text }]}
+              />
+            </View>
+            <View style={[styles.underline, { backgroundColor: c.border }]} />
+          </View>
+
+          <View style={styles.fieldGroup}>
+            <ThemedText style={[styles.label, { color: c.textMuted }]} type="mono">
               social & professional
             </ThemedText>
             <ThemedText style={[styles.emptyHint, { color: c.textSecondary }]}>
@@ -346,7 +449,9 @@ export default function ProfileSetupScreen() {
               horizontal
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.chipRow}>
-              {PLATFORMS.filter((p) => p.id !== 'other').map((p) => {
+              {PLATFORMS.filter(
+                (p) => p.id !== 'other' && p.id !== 'venmo' && p.id !== 'cashapp',
+              ).map((p) => {
                 const alreadyAdded = links.some(
                   (l) => l.label === p.label && !l.url,
                 );
@@ -576,6 +681,13 @@ const styles = StyleSheet.create({
   },
   yearText: { fontSize: 17 },
   emptyHint: { fontSize: 13, lineHeight: 18 },
+  payRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  paySigil: { fontSize: 16 },
+  payInput: { flex: 1 },
   chipRow: { gap: 8, paddingVertical: 8 },
   chip: {
     flexDirection: 'row',

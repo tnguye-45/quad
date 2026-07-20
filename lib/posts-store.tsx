@@ -205,12 +205,6 @@ const PostsContext = createContext<Store | null>(null);
 
 // ─────────────────────── DB ↔ App mappers ───────────────────────
 
-type DbProfileEmbed = {
-  display_name: string | null;
-  initials: string | null;
-  avatar_url: string | null;
-} | null;
-
 function dollarsToCents(payout: string): number {
   const n = Number(payout.replace(/[^0-9.]/g, ''));
   return Math.max(1, Math.round((Number.isFinite(n) ? n : 0) * 100));
@@ -234,111 +228,6 @@ function timeAgo(iso: string): string {
   return `${d}d ago`;
 }
 
-type DbGigRow = {
-  id: string;
-  poster_id: string;
-  title: string;
-  description: string | null;
-  category: GigCategory;
-  payout_cents: number;
-  location_label: string | null;
-  posted_at: string;
-  anonymous: boolean;
-  comment_count?: number | null;
-  poster?: DbProfileEmbed;
-};
-
-function gigFromDb(row: DbGigRow): Gig {
-  return {
-    id: row.id,
-    ownerId: row.poster_id,
-    anonymous: row.anonymous,
-    title: row.title,
-    description: row.description ?? undefined,
-    payout: centsToPayout(row.payout_cents),
-    category: row.category,
-    where: row.location_label ?? '',
-    postedAt: new Date(row.posted_at).getTime(),
-    rawPostedAt: row.posted_at,
-    postedAgo: timeAgo(row.posted_at),
-    posterName: row.anonymous ? null : (row.poster?.display_name ?? null),
-    posterInitials: row.anonymous ? null : (row.poster?.initials ?? null),
-    posterAvatarUrl: row.anonymous ? null : (row.poster?.avatar_url ?? null),
-    comments: row.comment_count ?? 0,
-  };
-}
-
-type DbHangoutRow = {
-  id: string;
-  host_id: string;
-  title: string;
-  vibe: string | null;
-  location_label: string | null;
-  when_label: string | null;
-  starts_at?: string | null;
-  description: string | null;
-  anonymous: boolean;
-  created_at: string;
-  comment_count?: number | null;
-  host?: DbProfileEmbed;
-  hangout_attendees?: { count: number }[];
-};
-
-function hangoutFromDb(row: DbHangoutRow): Hangout {
-  const going =
-    Array.isArray(row.hangout_attendees) && row.hangout_attendees[0]
-      ? row.hangout_attendees[0].count
-      : 0;
-  return {
-    id: row.id,
-    ownerId: row.host_id,
-    anonymous: row.anonymous,
-    title: row.title,
-    when: row.when_label ?? '',
-    where: row.location_label ?? '',
-    going,
-    vibe: row.vibe ?? 'Other',
-    description: row.description ?? undefined,
-    postedAt: new Date(row.created_at).getTime(),
-    rawPostedAt: row.created_at,
-    startsAt: row.starts_at ? new Date(row.starts_at).getTime() : null,
-    hostName: row.anonymous ? null : (row.host?.display_name ?? null),
-    hostInitials: row.anonymous ? null : (row.host?.initials ?? null),
-    hostAvatarUrl: row.anonymous ? null : (row.host?.avatar_url ?? null),
-    comments: row.comment_count ?? 0,
-  };
-}
-
-type DbVoiceRow = {
-  id: string;
-  author_id: string;
-  anonymous: boolean;
-  body: string;
-  topic: VoiceTopic;
-  posted_at: string;
-  vote_score: number;
-  comment_count?: number | null;
-  author?: DbProfileEmbed;
-};
-
-function voiceFromDb(row: DbVoiceRow): Voice {
-  return {
-    id: row.id,
-    ownerId: row.author_id,
-    anonymous: row.anonymous,
-    body: row.body,
-    topic: row.topic,
-    votes: row.vote_score,
-    comments: row.comment_count ?? 0,
-    postedAt: new Date(row.posted_at).getTime(),
-    rawPostedAt: row.posted_at,
-    postedAgo: timeAgo(row.posted_at),
-    posterName: row.anonymous ? null : (row.author?.display_name ?? null),
-    posterInitials: row.anonymous ? null : (row.author?.initials ?? null),
-    posterAvatarUrl: row.anonymous ? null : (row.author?.avatar_url ?? null),
-  };
-}
-
 // Compound keyset cursor for `(tsCol desc, id desc)` ordering. Returns the
 // PostgREST `.or()` expression selecting rows strictly older than the
 // (timestamp, id) cursor. Using id as a tiebreak is essential: seeded rows are
@@ -350,14 +239,16 @@ function keysetOlderThan(tsCol: string, ts: string, id: string): string {
   return `${tsCol}.lt."${ts}",and(${tsCol}.eq."${ts}",id.lt."${id}")`;
 }
 
-// INSERT paths keep the base-table embed select: a caller's own new row —
-// identity is not sensitive there, and inserts can't return view columns.
-const GIG_INSERT_SELECT =
-  '*, poster:profiles!gigs_poster_id_fkey(display_name, initials, avatar_url)';
-const HANGOUT_INSERT_SELECT =
-  '*, host:profiles!hangouts_host_id_fkey(display_name, initials, avatar_url), hangout_attendees(count)';
-const VOICE_INSERT_SELECT =
-  '*, author:profiles!voices_author_id_fkey(display_name, initials, avatar_url)';
+// INSERT returns (CLIENT_CONTRACT.md §1): identity columns are structurally
+// unreadable on the base tables, so `returning *` / author embeds fail with
+// 42501. Inserts select back only granted columns; the caller's own identity
+// (it's their post) is grafted on from the compose input.
+const GIG_RETURN_SELECT =
+  'id, anonymous, title, description, category, payout_cents, location_label, posted_at, comment_count';
+const HANGOUT_RETURN_SELECT =
+  'id, anonymous, title, vibe, location_label, when_label, starts_at, description, created_at, comment_count';
+const VOICE_RETURN_SELECT =
+  'id, anonymous, body, topic, posted_at, vote_score, comment_count';
 
 // ─────────────── Feed views (0027) — identity-safe reads ───────────────
 // All feed READS go through the *_feed security-barrier views, which null the
@@ -414,6 +305,7 @@ type DbHangoutFeedRow = {
   vibe: string | null;
   location_label: string | null;
   when_label: string | null;
+  starts_at: string | null;
   description: string | null;
   created_at: string;
   comment_count: number | null;
@@ -425,10 +317,10 @@ type DbHangoutFeedRow = {
 };
 
 const HANGOUT_FEED_SELECT =
-  'id, anonymous, title, vibe, location_label, when_label, description, ' +
+  'id, anonymous, title, vibe, location_label, when_label, starts_at, description, ' +
   'created_at, comment_count, going_count, host_id, host_display_name, host_initials, host_avatar_url';
 
-function hangoutFromFeed(row: DbHangoutFeedRow, startsAt: string | null): Hangout {
+function hangoutFromFeed(row: DbHangoutFeedRow): Hangout {
   return {
     id: row.id,
     ownerId: row.host_id ?? '',
@@ -441,7 +333,7 @@ function hangoutFromFeed(row: DbHangoutFeedRow, startsAt: string | null): Hangou
     description: row.description ?? undefined,
     postedAt: new Date(row.created_at).getTime(),
     rawPostedAt: row.created_at,
-    startsAt: startsAt ? new Date(startsAt).getTime() : null,
+    startsAt: row.starts_at ? new Date(row.starts_at).getTime() : null,
     hostName: row.anonymous ? null : row.host_display_name,
     hostInitials: row.anonymous ? null : row.host_initials,
     hostAvatarUrl: row.anonymous ? null : row.host_avatar_url,
@@ -493,17 +385,12 @@ function hangoutIsLive(h: Hangout): boolean {
   return h.startsAt == null || h.startsAt > Date.now() - HANGOUT_GRACE_MS;
 }
 
-// hangouts_feed doesn't expose starts_at, so expiry filtering batches it from
-// the base table. Narrow, identity-free select — no author columns, so this
-// doesn't reopen the hole the views close.
-async function fetchStartsAt(ids: string[]): Promise<Map<string, string | null>> {
-  const map = new Map<string, string | null>();
-  if (ids.length === 0) return map;
-  const { data } = await supabase.from('hangouts').select('id, starts_at').in('id', ids);
-  for (const row of (data ?? []) as { id: string; starts_at: string | null }[]) {
-    map.set(row.id, row.starts_at);
-  }
-  return map;
+// Server-side half of the same rule, ANDed with the keyset filter — dead
+// events shouldn't burn page slots. The timestamp is double-quoted so `+`/`:`
+// don't confuse the .or() parser.
+function hangoutLiveFilter(): string {
+  const cutoff = new Date(Date.now() - HANGOUT_GRACE_MS).toISOString();
+  return `starts_at.is.null,starts_at.gt."${cutoff}"`;
 }
 
 // ─────────────────────── Provider ───────────────────────
@@ -578,6 +465,7 @@ export function PostsProvider({ children }: { children: ReactNode }) {
         supabase
           .from('hangouts_feed')
           .select(HANGOUT_FEED_SELECT)
+          .or(hangoutLiveFilter())
           .order('created_at', { ascending: false })
           .order('id', { ascending: false })
           .limit(PAGE_SIZE),
@@ -596,7 +484,6 @@ export function PostsProvider({ children }: { children: ReactNode }) {
       const gigsData = (gigsRes.data ?? []) as unknown as DbGigFeedRow[];
       const hangoutsData = (hangoutsRes.data ?? []) as unknown as DbHangoutFeedRow[];
       const voicesData = (voicesRes.data ?? []) as unknown as DbVoiceFeedRow[];
-      const startsAtById = await fetchStartsAt(hangoutsData.map((r) => r.id));
       if (fetchGenRef.current !== gen) return;
       const lastGig = gigsData[gigsData.length - 1];
       const lastHangout = hangoutsData[hangoutsData.length - 1];
@@ -607,11 +494,7 @@ export function PostsProvider({ children }: { children: ReactNode }) {
         voices: lastVoice ? { ts: lastVoice.posted_at, id: lastVoice.id } : undefined,
       };
       setGigs(gigsData.map(gigFromFeed));
-      setHangouts(
-        hangoutsData
-          .map((r) => hangoutFromFeed(r, startsAtById.get(r.id) ?? null))
-          .filter(hangoutIsLive),
-      );
+      setHangouts(hangoutsData.map(hangoutFromFeed).filter(hangoutIsLive));
       setVoices(voicesData.map(voiceFromFeed));
       setHasMore({
         gigs: gigsData.length === PAGE_SIZE,
@@ -683,6 +566,8 @@ export function PostsProvider({ children }: { children: ReactNode }) {
             .from('hangouts_feed')
             .select(HANGOUT_FEED_SELECT)
             .or(keysetOlderThan('created_at', cursor.ts, cursor.id))
+            // Second .or() is ANDed with the first by PostgREST.
+            .or(hangoutLiveFilter())
             .order('created_at', { ascending: false })
             .order('id', { ascending: false })
             .limit(PAGE_SIZE);
@@ -693,13 +578,9 @@ export function PostsProvider({ children }: { children: ReactNode }) {
             setHasMore((h) => ({ ...h, hangouts: false }));
             return;
           }
-          const startsAtById = await fetchStartsAt(rows.map((r) => r.id));
-          if (fetchGenRef.current !== gen) return;
           const last = rows[rows.length - 1];
           cursorRef.current.hangouts = { ts: last.created_at, id: last.id };
-          const added = rows
-            .map((r) => hangoutFromFeed(r, startsAtById.get(r.id) ?? null))
-            .filter(hangoutIsLive);
+          const added = rows.map(hangoutFromFeed).filter(hangoutIsLive);
           setHangouts((cur) => {
             const curSeen = new Set(cur.map((h) => h.id));
             return [...cur, ...added.filter((h) => !curSeen.has(h.id))];
@@ -743,103 +624,88 @@ export function PostsProvider({ children }: { children: ReactNode }) {
     fetchAll();
   }, [fetchAll]);
 
-  // Realtime: refetch the row when something new lands. Cheap and correct
-  // (single-row roundtrip). The refetch goes through the *_feed views so the
-  // author columns arrive pre-masked — and a blocked author's post simply
-  // comes back as no row, which drops it instead of inserting it.
+  // Realtime (CLIENT_CONTRACT.md §2): the content tables left the realtime
+  // publication — their full-row payloads leaked author ids. The only signal
+  // is feed_events (kind + op + target id, no identity); on each event we
+  // refetch the affected row through its *_feed view, so author columns
+  // arrive pre-masked and a blocked author's post comes back as no row.
+  //
+  // Comment count bumps ride the parent's own 'update' event (the count
+  // trigger updates the parent row), so kind:'comment' events are ignored
+  // here — they exist for thread screens.
   useEffect(() => {
     if (!realSession) return;
+
+    type FeedEvent = {
+      kind: 'gig' | 'hangout' | 'voice' | 'comment';
+      op: 'insert' | 'update' | 'delete';
+      target_id: string;
+    };
+
+    // Shared apply semantics: insert prepends (or replaces, if the row is
+    // already present from the optimistic path); update patches in place and
+    // drops rows the view no longer returns; delete removes.
+    function applyRow<T extends { id: string }>(
+      setter: (fn: (cur: T[]) => T[]) => void,
+      id: string,
+      op: 'insert' | 'update',
+      fresh: T | null,
+    ) {
+      if (!fresh) {
+        if (op === 'update') setter((cur) => cur.filter((x) => x.id !== id));
+        return;
+      }
+      setter((cur) => {
+        const exists = cur.some((x) => x.id === id);
+        if (!exists) {
+          return op === 'insert' ? [fresh, ...cur] : cur;
+        }
+        return cur.map((x) => (x.id === id ? fresh : x));
+      });
+    }
+
+    const handleEvent = async (ev: FeedEvent) => {
+      if (ev.kind === 'comment') return;
+      if (ev.op === 'delete') {
+        if (ev.kind === 'gig') setGigs((cur) => cur.filter((g) => g.id !== ev.target_id));
+        else if (ev.kind === 'hangout')
+          setHangouts((cur) => cur.filter((h) => h.id !== ev.target_id));
+        else setVoices((cur) => cur.filter((v) => v.id !== ev.target_id));
+        return;
+      }
+      if (ev.kind === 'gig') {
+        const { data } = await supabase
+          .from('gigs_feed')
+          .select(GIG_FEED_SELECT)
+          .eq('id', ev.target_id)
+          .maybeSingle();
+        applyRow(setGigs, ev.target_id, ev.op, data ? gigFromFeed(data as unknown as DbGigFeedRow) : null);
+      } else if (ev.kind === 'hangout') {
+        const { data } = await supabase
+          .from('hangouts_feed')
+          .select(HANGOUT_FEED_SELECT)
+          .eq('id', ev.target_id)
+          .maybeSingle();
+        const fresh = data ? hangoutFromFeed(data as unknown as DbHangoutFeedRow) : null;
+        if (fresh && ev.op === 'insert' && !hangoutIsLive(fresh)) return;
+        applyRow(setHangouts, ev.target_id, ev.op, fresh);
+      } else {
+        const { data } = await supabase
+          .from('voices_feed')
+          .select(VOICE_FEED_SELECT)
+          .eq('id', ev.target_id)
+          .maybeSingle();
+        applyRow(setVoices, ev.target_id, ev.op, data ? voiceFromFeed(data as unknown as DbVoiceFeedRow) : null);
+      }
+    };
+
     const channel = supabase
-      .channel('posts-feed')
+      .channel('posts-feed-events')
       .on(
         'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'gigs' },
-        async (payload) => {
-          const id = (payload.new as { id: string }).id;
-          const { data } = await supabase
-            .from('gigs_feed')
-            .select(GIG_FEED_SELECT)
-            .eq('id', id)
-            .maybeSingle();
-          if (data) {
-            const fresh = gigFromFeed(data as unknown as DbGigFeedRow);
-            setGigs((cur) => [fresh, ...cur.filter((g) => g.id !== fresh.id)]);
-          }
-        },
-      )
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'hangouts' },
-        async (payload) => {
-          const row = payload.new as { id: string; starts_at?: string | null };
-          const { data } = await supabase
-            .from('hangouts_feed')
-            .select(HANGOUT_FEED_SELECT)
-            .eq('id', row.id)
-            .maybeSingle();
-          if (data) {
-            // starts_at isn't in the view, but the INSERT payload carries it.
-            const fresh = hangoutFromFeed(
-              data as unknown as DbHangoutFeedRow,
-              row.starts_at ?? null,
-            );
-            if (!hangoutIsLive(fresh)) return;
-            setHangouts((cur) => [fresh, ...cur.filter((h) => h.id !== fresh.id)]);
-          }
-        },
-      )
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'voices' },
-        async (payload) => {
-          const id = (payload.new as { id: string }).id;
-          const { data } = await supabase
-            .from('voices_feed')
-            .select(VOICE_FEED_SELECT)
-            .eq('id', id)
-            .maybeSingle();
-          if (data) {
-            const fresh = voiceFromFeed(data as unknown as DbVoiceFeedRow);
-            setVoices((cur) => [fresh, ...cur.filter((v) => v.id !== fresh.id)]);
-          }
-        },
-      )
-      .on(
-        'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'voices' },
+        { event: 'INSERT', schema: 'public', table: 'feed_events' },
         (payload) => {
-          const row = payload.new as { id: string; vote_score: number; comment_count: number };
-          setVoices((cur) =>
-            cur.map((v) =>
-              v.id === row.id
-                ? { ...v, votes: row.vote_score, comments: row.comment_count ?? v.comments }
-                : v,
-            ),
-          );
-        },
-      )
-      .on(
-        'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'gigs' },
-        (payload) => {
-          const row = payload.new as { id: string; comment_count: number };
-          setGigs((cur) =>
-            cur.map((g) =>
-              g.id === row.id ? { ...g, comments: row.comment_count ?? g.comments } : g,
-            ),
-          );
-        },
-      )
-      .on(
-        'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'hangouts' },
-        (payload) => {
-          const row = payload.new as { id: string; comment_count: number };
-          setHangouts((cur) =>
-            cur.map((h) =>
-              h.id === row.id ? { ...h, comments: row.comment_count ?? h.comments } : h,
-            ),
-          );
+          void handleEvent(payload.new as FeedEvent);
         },
       )
       .subscribe();
@@ -883,7 +749,7 @@ export function PostsProvider({ children }: { children: ReactNode }) {
         location_label: input.where,
         anonymous: input.anonymous,
       })
-      .select(GIG_INSERT_SELECT)
+      .select(GIG_RETURN_SELECT)
       .single();
     if (insertErr) {
       console.warn('[posts-store] addGig failed:', insertErr.message);
@@ -891,7 +757,15 @@ export function PostsProvider({ children }: { children: ReactNode }) {
       return false;
     }
     if (data) {
-      const fresh = gigFromDb(data as DbGigRow);
+      // The base table can't return identity columns — it's our own post, so
+      // graft the caller's identity onto the returned row.
+      const fresh = gigFromFeed({
+        ...(data as unknown as DbGigFeedRow),
+        poster_id: input.ownerId,
+        poster_display_name: input.posterName,
+        poster_initials: input.posterInitials,
+        poster_avatar_url: input.posterAvatarUrl,
+      });
       setGigs((cur) => [fresh, ...cur.filter((g) => g.id !== fresh.id)]);
     }
     return true;
@@ -933,7 +807,7 @@ export function PostsProvider({ children }: { children: ReactNode }) {
         description: input.description ?? null,
         anonymous: input.anonymous,
       })
-      .select(HANGOUT_INSERT_SELECT)
+      .select(HANGOUT_RETURN_SELECT)
       .single();
     if (insertErr) {
       console.warn('[posts-store] addHangout failed:', insertErr.message);
@@ -942,13 +816,18 @@ export function PostsProvider({ children }: { children: ReactNode }) {
     }
     // Host is implicitly RSVP'd — insert into attendees so going count = 1.
     if (data) {
+      const row = data as unknown as DbHangoutFeedRow;
       await supabase
         .from('hangout_attendees')
-        .insert({ hangout_id: (data as DbHangoutRow).id, user_id: input.ownerId })
+        .insert({ hangout_id: row.id, user_id: input.ownerId })
         .then(() => undefined, () => undefined);
-      const fresh = hangoutFromDb({
-        ...(data as DbHangoutRow),
-        hangout_attendees: [{ count: 1 }],
+      const fresh = hangoutFromFeed({
+        ...row,
+        going_count: 1,
+        host_id: input.ownerId,
+        host_display_name: input.hostName,
+        host_initials: input.hostInitials,
+        host_avatar_url: input.hostAvatarUrl,
       });
       setHangouts((cur) => [fresh, ...cur.filter((h) => h.id !== fresh.id)]);
       setMyRsvps((cur) => ({ ...cur, [fresh.id]: true }));
@@ -984,7 +863,7 @@ export function PostsProvider({ children }: { children: ReactNode }) {
         body: input.body,
         topic: input.topic,
       })
-      .select(VOICE_INSERT_SELECT)
+      .select(VOICE_RETURN_SELECT)
       .single();
     if (insertErr) {
       console.warn('[posts-store] addVoice failed:', insertErr.message);
@@ -992,7 +871,13 @@ export function PostsProvider({ children }: { children: ReactNode }) {
       return false;
     }
     if (data) {
-      const fresh = voiceFromDb(data as DbVoiceRow);
+      const fresh = voiceFromFeed({
+        ...(data as unknown as DbVoiceFeedRow),
+        author_id: input.ownerId,
+        author_display_name: input.posterName,
+        author_initials: input.posterInitials,
+        author_avatar_url: input.posterAvatarUrl,
+      });
       setVoices((cur) => [fresh, ...cur.filter((v) => v.id !== fresh.id)]);
     }
     return true;
@@ -1020,7 +905,14 @@ export function PostsProvider({ children }: { children: ReactNode }) {
       });
       if (rsvpErr) {
         console.warn('[posts-store] rsvp failed:', rsvpErr.message);
-        setError(rsvpErr.message);
+        // Contract error codes: 23514 = capacity, 42501 = blocked vs host.
+        setError(
+          rsvpErr.code === '23514'
+            ? 'This hangout is full.'
+            : rsvpErr.code === '42501'
+              ? "You can't join this hangout."
+              : rsvpErr.message,
+        );
         return;
       }
       setMyRsvps((cur) => ({ ...cur, [id]: true }));

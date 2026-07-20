@@ -114,9 +114,11 @@ export function useComments(
   useEffect(() => {
     fetchAll();
     if (!realSession || !targetType || !targetId) return;
-    // Realtime: hydrate the row on insert so we get the joined author profile;
-    // drop locally on delete. Filter scopes the channel to this single target
-    // so other detail screens don't get cross-talk.
+    // Realtime (CLIENT_CONTRACT.md §2): the comments table left the realtime
+    // publication, so the signal is feed_events — filtered server-side to this
+    // thread via comment_target_id. On insert we hydrate the row through
+    // comments_feed (masked author + block filter: a blocked author's comment
+    // comes back as no row and is dropped); on delete we drop locally.
     const channel = supabase
       .channel(`comments:${targetType}:${targetId}:${++channelSeq}`)
       .on(
@@ -124,18 +126,26 @@ export function useComments(
         {
           event: 'INSERT',
           schema: 'public',
-          table: 'comments',
-          filter: `target_id=eq.${targetId}`,
+          table: 'feed_events',
+          filter: `comment_target_id=eq.${targetId}`,
         },
         async (payload) => {
-          const row = payload.new as { id: string; target_type: CommentTargetType };
-          if (row.target_type !== targetType) return;
-          // Refetch through the view: masked author + block filter applied —
-          // a blocked author's comment comes back as no row and is dropped.
+          const ev = payload.new as {
+            kind: string;
+            op: 'insert' | 'update' | 'delete';
+            target_id: string;
+            comment_target_type: string | null;
+          };
+          if (ev.kind !== 'comment' || ev.comment_target_type !== targetType) return;
+          if (ev.op === 'delete') {
+            if (!mountedRef.current) return;
+            setComments((cur) => cur.filter((c) => c.id !== ev.target_id));
+            return;
+          }
           const { data } = await supabase
             .from('comments_feed')
             .select(COMMENT_SELECT)
-            .eq('id', row.id)
+            .eq('id', ev.target_id)
             .maybeSingle();
           if (!mountedRef.current || !data) return;
           const fresh = fromRow(data as unknown as CommentRow);
@@ -143,20 +153,6 @@ export function useComments(
             if (cur.some((c) => c.id === fresh.id)) return cur;
             return [...cur, fresh];
           });
-        },
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: 'DELETE',
-          schema: 'public',
-          table: 'comments',
-          filter: `target_id=eq.${targetId}`,
-        },
-        (payload) => {
-          const row = payload.old as { id?: string };
-          if (!row?.id || !mountedRef.current) return;
-          setComments((cur) => cur.filter((c) => c.id !== row.id));
         },
       )
       .subscribe();

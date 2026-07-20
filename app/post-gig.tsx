@@ -40,11 +40,14 @@ export default function PostGigScreen() {
   const [err, setErr] = useState<string | null>(null);
 
   const payoutNumber = Number(payout.replace(/[^0-9.]/g, ''));
+  // DB check caps payout_cents at 1_000_000 ($10,000) — mirror it client-side.
+  const payoutTooHigh = payoutNumber > 10000;
   const canSubmit =
     !busy &&
     title.trim().length >= 3 &&
     category !== null &&
     payoutNumber > 0 &&
+    !payoutTooHigh &&
     where.trim().length >= 2;
 
   async function handleSubmit() {
@@ -175,10 +178,16 @@ export default function PostGigScreen() {
                   placeholder="40"
                   placeholderTextColor={c.textMuted}
                   keyboardType="numeric"
+                  maxLength={5}
                   style={[styles.input, styles.inputBare, { color: c.text }]}
                 />
               </View>
               <View style={[styles.underline, { backgroundColor: c.border }]} />
+              {payoutTooHigh ? (
+                <ThemedText style={[styles.fieldHint, { color: c.danger }]} type="mono">
+                  max $10,000
+                </ThemedText>
+              ) : null}
             </FieldGroup>
             <FieldGroup label="Where" colors={c} style={{ flex: 2 }}>
               <TextInput
@@ -466,6 +475,11 @@ const styles = StyleSheet.create({
     fontSize: 10,
     letterSpacing: 0.3,
     marginTop: 2,
+    textTransform: 'lowercase',
+  },
+  fieldHint: {
+    fontSize: 10,
+    letterSpacing: 0.4,
     textTransform: 'lowercase',
   },
   error: { fontSize: 13, lineHeight: 18 },

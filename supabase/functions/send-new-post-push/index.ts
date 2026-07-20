@@ -85,19 +85,29 @@ function json(status: number, body: unknown): Response {
   });
 }
 
-async function pgSelect<T>(path: string): Promise<T[]> {
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
-    headers: {
-      apikey: SERVICE_ROLE_KEY,
-      authorization: `Bearer ${SERVICE_ROLE_KEY}`,
-      accept: 'application/json',
-    },
-  });
-  if (!res.ok) {
-    const txt = await res.text();
-    throw new Error(`pgSelect ${path} failed: ${res.status} ${txt}`);
+// PostgREST silently caps un-ranged selects (~1000 rows), which would make
+// pushes stop reaching part of campus once user_push_tokens grows past the
+// cap. Page through with Range headers until a short page. Callers must pass
+// a deterministic `order=` in `path` so pages don't shear.
+async function pgSelectAll<T>(path: string, pageSize = 1000): Promise<T[]> {
+  const out: T[] = [];
+  for (let from = 0; ; from += pageSize) {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+      headers: {
+        apikey: SERVICE_ROLE_KEY,
+        authorization: `Bearer ${SERVICE_ROLE_KEY}`,
+        accept: 'application/json',
+        range: `${from}-${from + pageSize - 1}`,
+      },
+    });
+    if (!res.ok) {
+      const txt = await res.text();
+      throw new Error(`pgSelectAll ${path} failed: ${res.status} ${txt}`);
+    }
+    const page = (await res.json()) as T[];
+    out.push(...page);
+    if (page.length < pageSize) return out;
   }
-  return (await res.json()) as T[];
 }
 
 async function pgDeleteToken(userId: string): Promise<void> {
@@ -130,9 +140,9 @@ async function resolveRecipients(
   authorId: string,
   prefColumn: 'new_gigs' | 'new_hangouts',
 ): Promise<{ userId: string; token: string }[]> {
-  // 1) All push tokens.
-  const tokens = await pgSelect<{ user_id: string; expo_push_token: string }>(
-    `user_push_tokens?select=user_id,expo_push_token`,
+  // 1) All push tokens (paginated — see pgSelectAll).
+  const tokens = await pgSelectAll<{ user_id: string; expo_push_token: string }>(
+    `user_push_tokens?select=user_id,expo_push_token&order=user_id.asc`,
   );
 
   let candidates = tokens.filter(
@@ -145,10 +155,12 @@ async function resolveRecipients(
 
   // 2) Filter out users who blocked the author or whom the author blocked.
   // user_blocks lives in 0013 — tolerate missing table by catching.
-  const blocks = await pgSelect<{ blocker_id: string; blocked_id: string }>(
+  const blocks = await pgSelectAll<{ blocker_id: string; blocked_id: string }>(
     `user_blocks?or=(blocker_id.eq.${encodeURIComponent(
       authorId,
-    )},blocked_id.eq.${encodeURIComponent(authorId)})&select=blocker_id,blocked_id`,
+    )},blocked_id.eq.${encodeURIComponent(
+      authorId,
+    )})&select=blocker_id,blocked_id&order=blocker_id.asc,blocked_id.asc`,
   ).catch(() => [] as { blocker_id: string; blocked_id: string }[]);
   if (blocks.length > 0) {
     const blocked = new Set<string>();
@@ -159,20 +171,15 @@ async function resolveRecipients(
   }
   if (candidates.length === 0) return [];
 
-  // 3) Apply notification_prefs. Anyone with the pref set to false drops out.
-  // Missing row defaults to true (the table's default), so anyone without a
-  // row stays in. Tolerate the table not existing yet.
-  const userIds = candidates.map((c) => c.user_id);
-  const inList = userIds.map(encodeURIComponent).join(',');
-  const prefs = await pgSelect<Record<string, unknown>>(
-    `notification_prefs?user_id=in.(${inList})&select=user_id,${prefColumn}`,
-  ).catch(() => [] as Record<string, unknown>[]);
-  const optedOut = new Set<string>();
-  for (const p of prefs) {
-    if (p[prefColumn] === false && typeof p.user_id === 'string') {
-      optedOut.add(p.user_id);
-    }
-  }
+  // 3) Apply notification_prefs. Anyone with the pref set to false drops out;
+  // missing row defaults to true (the table's default). Query the opted-OUT
+  // set directly instead of an in-list of every candidate — an in-list of
+  // thousands of uuids overflows the URL long before the row cap bites.
+  // Tolerate the table not existing yet.
+  const prefs = await pgSelectAll<{ user_id: string }>(
+    `notification_prefs?${prefColumn}=eq.false&select=user_id&order=user_id.asc`,
+  ).catch(() => [] as { user_id: string }[]);
+  const optedOut = new Set<string>(prefs.map((p) => p.user_id));
   candidates = candidates.filter((c) => !optedOut.has(c.user_id));
 
   return candidates.map((c) => ({ userId: c.user_id, token: c.expo_push_token }));

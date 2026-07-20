@@ -24,7 +24,7 @@
 //   9. user_blocks         (blocker_id OR blocked_id)
 //  10. notification_prefs  (user_id)
 //  11. user_push_tokens    (user_id)
-//  12. avatars storage      (path prefix `{uid}/`)
+//  12. avatars + message-images storage (path prefix `{uid}/`, paginated)
 //  13. profiles            (id) — cascades from auth.users delete below, but
 //                            we delete explicitly for belt-and-suspenders.
 //  14. auth.admin.deleteUser(uid) — last step, after everything else is gone.
@@ -91,41 +91,50 @@ async function pgDelete(table: string, filter: string): Promise<void> {
   }
 }
 
-// Storage REST: list and delete every object under `{uid}/` in the avatars bucket.
-async function deleteAvatarObjects(userId: string): Promise<void> {
+// Storage REST: list and delete every object under `{uid}/` in a bucket.
+// Loops list→delete (always from offset 0 — each delete shifts the listing)
+// until the prefix is empty, so users with more than one page of objects are
+// fully cleaned up. The iteration cap only guards against a delete call that
+// silently removes nothing; 200 pages × 100 objects is far beyond any real
+// account.
+async function deleteBucketObjects(bucket: string, userId: string): Promise<void> {
   try {
-    const listRes = await fetch(`${SUPABASE_URL}/storage/v1/object/list/avatars`, {
-      method: 'POST',
-      headers: {
-        apikey: SERVICE_ROLE_KEY,
-        authorization: `Bearer ${SERVICE_ROLE_KEY}`,
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({ prefix: `${userId}/`, limit: 100 }),
-    });
-    if (!listRes.ok) {
-      const txt = await listRes.text();
-      console.warn(`avatars list failed: ${listRes.status} ${txt}`);
-      return;
+    for (let page = 0; page < 200; page++) {
+      const listRes = await fetch(`${SUPABASE_URL}/storage/v1/object/list/${bucket}`, {
+        method: 'POST',
+        headers: {
+          apikey: SERVICE_ROLE_KEY,
+          authorization: `Bearer ${SERVICE_ROLE_KEY}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ prefix: `${userId}/`, limit: 100 }),
+      });
+      if (!listRes.ok) {
+        const txt = await listRes.text();
+        console.warn(`${bucket} list failed: ${listRes.status} ${txt}`);
+        return;
+      }
+      const items = (await listRes.json()) as { name: string }[];
+      if (!Array.isArray(items) || items.length === 0) return;
+      const paths = items.map((i) => `${userId}/${i.name}`);
+      const delRes = await fetch(`${SUPABASE_URL}/storage/v1/object/${bucket}`, {
+        method: 'DELETE',
+        headers: {
+          apikey: SERVICE_ROLE_KEY,
+          authorization: `Bearer ${SERVICE_ROLE_KEY}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ prefixes: paths }),
+      });
+      if (!delRes.ok) {
+        const txt = await delRes.text();
+        console.warn(`${bucket} delete failed: ${delRes.status} ${txt}`);
+        return;
+      }
     }
-    const items = (await listRes.json()) as { name: string }[];
-    if (!Array.isArray(items) || items.length === 0) return;
-    const paths = items.map((i) => `${userId}/${i.name}`);
-    const delRes = await fetch(`${SUPABASE_URL}/storage/v1/object/avatars`, {
-      method: 'DELETE',
-      headers: {
-        apikey: SERVICE_ROLE_KEY,
-        authorization: `Bearer ${SERVICE_ROLE_KEY}`,
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({ prefixes: paths }),
-    });
-    if (!delRes.ok) {
-      const txt = await delRes.text();
-      console.warn(`avatars delete failed: ${delRes.status} ${txt}`);
-    }
+    console.warn(`${bucket} cleanup hit the page cap for user ${userId}`);
   } catch (err) {
-    console.warn('avatars cleanup threw', err);
+    console.warn(`${bucket} cleanup threw`, err);
   }
 }
 
@@ -191,7 +200,10 @@ Deno.serve(async (req: Request) => {
     await pgDelete('notification_prefs', uidEq);
     await pgDelete('user_push_tokens', uidEq);
 
-    await deleteAvatarObjects(uid);
+    // Both public buckets are keyed by `{uid}/...` — message images are
+    // publicly addressable forever if we skip them here (5.1.1(v) exposure).
+    await deleteBucketObjects('avatars', uid);
+    await deleteBucketObjects('message-images', uid);
 
     // profiles cascades from auth.users, but explicit delete protects against
     // the rare case where auth delete partially fails.

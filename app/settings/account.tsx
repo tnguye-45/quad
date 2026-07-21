@@ -2,7 +2,6 @@ import Constants from 'expo-constants';
 import { Link, router } from 'expo-router';
 import { useState } from 'react';
 import {
-  Alert,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -17,6 +16,7 @@ import { ThemedView } from '@/components/themed-view';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useAuth } from '@/lib/auth-context';
+import { confirmAsync } from '@/lib/confirm';
 import { clearPushToken } from '@/lib/notifications';
 
 const CONFIRM_WORD = 'DELETE';
@@ -67,35 +67,30 @@ export default function AccountSettingsScreen() {
     }
   }
 
-  function handleDelete() {
+  async function handleDelete() {
     if (!canDelete) return;
     setErr(null);
-    Alert.alert(
-      'Delete account?',
-      'This permanently removes your profile, posts, hangouts, voices, and messages you sent. This cannot be undone.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            setBusy(true);
-            const result = await callDeleteAccount();
-            if (!result.ok) {
-              setBusy(false);
-              setErr(result.error ?? 'Something went wrong.');
-              return;
-            }
-            // Sign out (clears local session + Supabase session). signOut also
-            // tries to call supabase.auth.signOut(); that will 401 since the
-            // user no longer exists — fine, we tolerate the warning.
-            await signOut().catch(() => {});
-            // Hard reset to /welcome so the route guard can't bounce us back.
-            router.replace('/welcome');
-          },
-        },
-      ],
-    );
+    const confirmed = await confirmAsync({
+      title: 'Delete account?',
+      message:
+        'This permanently removes your profile, posts, hangouts, voices, and messages you sent. This cannot be undone.',
+      confirmLabel: 'Delete',
+      destructive: true,
+    });
+    if (!confirmed) return;
+    setBusy(true);
+    const result = await callDeleteAccount();
+    if (!result.ok) {
+      setBusy(false);
+      setErr(result.error ?? 'Something went wrong.');
+      return;
+    }
+    // Sign out (clears local session + Supabase session). signOut also tries to
+    // call supabase.auth.signOut(); that will 401 since the user no longer
+    // exists — fine, we tolerate the warning.
+    await signOut().catch(() => {});
+    // Hard reset to /welcome so the route guard can't bounce us back.
+    router.replace('/welcome');
   }
 
   const appVersion = Constants.expoConfig?.version ?? '—';

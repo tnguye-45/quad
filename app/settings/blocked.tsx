@@ -2,7 +2,6 @@ import { router } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -15,6 +14,7 @@ import { ThemedView } from '@/components/themed-view';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useAuth } from '@/lib/auth-context';
+import { confirmAsync } from '@/lib/confirm';
 import { supabase } from '@/lib/supabase';
 
 type BlockedRow = {
@@ -63,28 +63,22 @@ export default function BlockedUsersScreen() {
 
   async function unblock(blockedId: string, name: string | null) {
     if (!session) return;
-    Alert.alert(
-      `Unblock ${name ?? 'this user'}?`,
-      'Their posts will show up again. You can re-block them at any time.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Unblock',
-          onPress: async () => {
-            const { error } = await supabase
-              .from('user_blocks')
-              .delete()
-              .eq('blocker_id', session.user.id)
-              .eq('blocked_id', blockedId);
-            if (error) {
-              Alert.alert('Unblock failed', error.message);
-              return;
-            }
-            setRows((prev) => prev.filter((r) => r.blocked_id !== blockedId));
-          },
-        },
-      ],
-    );
+    const confirmed = await confirmAsync({
+      title: `Unblock ${name ?? 'this user'}?`,
+      message: 'Their posts will show up again. You can re-block them at any time.',
+      confirmLabel: 'Unblock',
+    });
+    if (!confirmed) return;
+    const { error } = await supabase
+      .from('user_blocks')
+      .delete()
+      .eq('blocker_id', session.user.id)
+      .eq('blocked_id', blockedId);
+    if (error) {
+      await confirmAsync({ title: 'Unblock failed', message: error.message, confirmLabel: 'OK' });
+      return;
+    }
+    setRows((prev) => prev.filter((r) => r.blocked_id !== blockedId));
   }
 
   return (

@@ -23,7 +23,8 @@ export default function VoicesScreen() {
   const c = Colors[useColorScheme() ?? 'light'];
   const [filter, setFilter] = useState<(typeof FILTERS)[number]>('Hot');
   const [refreshing, setRefreshing] = useState(false);
-  const { voices, voteVoice, loading, hydrated, error, refresh, loadMore, hasMore } = usePosts();
+  const { voices, voteVoice, myVotes, loading, hydrated, error, refresh, loadMore, hasMore } =
+    usePosts();
   const showLoading = !hydrated && loading && voices.length === 0;
   // Don't invite them to post when the feed merely failed to load — the retry
   // row above is already saying the opposite.
@@ -88,7 +89,8 @@ export default function VoicesScreen() {
           <VoiceCard
             voice={item}
             c={c}
-            onVote={(d) => voteVoice(item.id, d)}
+            vote={myVotes[item.id] ?? 0}
+            onVote={(arrow) => voteVoice(item.id, arrow)}
           />
         )}
         ListHeaderComponent={
@@ -158,30 +160,19 @@ export default function VoicesScreen() {
 function VoiceCard({
   voice,
   c,
+  vote,
   onVote,
 }: {
   voice: Voice;
   c: (typeof Colors)['light'];
-  onVote: (delta: 1 | -1 | 0) => void;
+  vote: 0 | 1 | -1;
+  onVote: (arrow: 1 | -1) => void;
 }) {
-  const [vote, setVote] = useState<0 | 1 | -1>(0);
   const score = voice.votes;
 
-  const press = (dir: 1 | -1) => () => {
-    const next = vote === dir ? 0 : dir;
-    const delta = (next - vote) as 1 | -1 | 0 | 2 | -2;
-    if (delta === 0) return;
-    if (delta === 2) {
-      onVote(1);
-      onVote(1);
-    } else if (delta === -2) {
-      onVote(-1);
-      onVote(-1);
-    } else {
-      onVote(delta as 1 | -1);
-    }
-    setVote(next);
-  };
+  // The store owns the vote state (single source of truth across list + detail)
+  // and handles the toggle when the active arrow is tapped again.
+  const press = (dir: 1 | -1) => () => onVote(dir);
 
   const scoreColor =
     vote === 1 ? c.accent : vote === -1 ? c.textSecondary : c.textSecondary;

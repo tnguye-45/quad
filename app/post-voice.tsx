@@ -49,7 +49,7 @@ export default function PostVoiceScreen() {
     setErr(null);
     setBusy(true);
     try {
-      await addVoice({
+      const ok = await addVoice({
         body: body.trim(),
         topic,
         anonymous,
@@ -58,6 +58,10 @@ export default function PostVoiceScreen() {
         posterInitials: profile?.initials ?? null,
         posterAvatarUrl: profile?.avatar_url ?? null,
       });
+      if (!ok) {
+        setErr("Couldn't post your voice. Check your connection and try again.");
+        return;
+      }
       router.back();
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : 'Failed to post.');

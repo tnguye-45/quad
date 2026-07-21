@@ -116,7 +116,7 @@ function buildMapHtml(pins: Pin[]): string {
 <body>
 <div id="map"></div>
 <script>
-  const PINS = ${JSON.stringify(pins)};
+  const PINS = ${JSON.stringify(pins).replace(/</g, '\\u003c')};
   const map = L.map('map', { zoomControl: true, attributionControl: true }).setView([${CAMPUS_CENTER.lat}, ${CAMPUS_CENTER.lon}], 16);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     maxZoom: 19,
@@ -157,6 +157,10 @@ export default function MapScreen() {
       {Platform.OS === 'web' ? (
         <iframe
           srcDoc={html}
+          // allow-scripts WITHOUT allow-same-origin gives the frame an opaque
+          // origin, so even if user content broke out of the script context it
+          // could not read the parent's localStorage (Supabase session token).
+          sandbox="allow-scripts"
           title="Notre Dame activities map"
           style={{
             position: 'absolute',

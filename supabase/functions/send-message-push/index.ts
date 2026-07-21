@@ -185,7 +185,27 @@ async function resolveRecipientTokens(
   );
   if (members.length === 0) return [];
 
-  const userIds = members.map((m) => m.user_id);
+  let userIds = members.map((m) => m.user_id);
+
+  // Drop anyone on either side of a block with the sender. The messages RLS
+  // policy (migration 0013) already hides a blocked sender's messages in-app,
+  // so pushing them anyway would be a harassment workaround — the recipient
+  // would get a notification for a message they can never see. Tolerate the
+  // table not existing yet by catching.
+  const blocks = await pgSelect<{ blocker_id: string; blocked_id: string }>(
+    `user_blocks?or=(blocker_id.eq.${encodeURIComponent(
+      senderId,
+    )},blocked_id.eq.${encodeURIComponent(senderId)})&select=blocker_id,blocked_id`,
+  ).catch(() => [] as { blocker_id: string; blocked_id: string }[]);
+  if (blocks.length > 0) {
+    const blocked = new Set<string>();
+    for (const b of blocks) {
+      blocked.add(b.blocker_id === senderId ? b.blocked_id : b.blocker_id);
+    }
+    userIds = userIds.filter((id) => !blocked.has(id));
+  }
+  if (userIds.length === 0) return [];
+
   const inList = userIds.map(encodeURIComponent).join(',');
 
   // 2) Notification preferences for `messages`. Missing row → opt-in (default

@@ -51,3 +51,7 @@ app-example
 # generated native folders
 /ios
 /android
+
+# internal business docs — NEVER publish to the public repo
+business/
+quad-marketing-plan.pdf

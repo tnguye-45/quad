@@ -160,6 +160,20 @@ async function getPushToken(userId: string): Promise<string | null> {
   return row?.expo_push_token ?? null;
 }
 
+// True if either user has blocked the other. Used to suppress the comment push
+// so a blocked commenter can't ping the post owner. Tolerates a missing
+// user_blocks table by treating "no data" as "not blocked".
+async function areBlocked(a: string, b: string): Promise<boolean> {
+  const rows = await pgGetOne<{ blocker_id: string }>(
+    `user_blocks?or=(and(blocker_id.eq.${encodeURIComponent(a)},blocked_id.eq.${encodeURIComponent(
+      b,
+    )}),and(blocker_id.eq.${encodeURIComponent(b)},blocked_id.eq.${encodeURIComponent(
+      a,
+    )}))&select=blocker_id&limit=1`,
+  ).catch(() => null);
+  return rows !== null;
+}
+
 async function commenterDisplayName(
   authorId: string,
   anonymous: boolean,
@@ -283,6 +297,10 @@ Deno.serve(async (req: Request) => {
     }
     if (owner.ownerId === record.author_id) {
       return json(200, { skipped: true, reason: 'self-comment' });
+    }
+
+    if (await areBlocked(owner.ownerId, record.author_id)) {
+      return json(200, { skipped: true, reason: 'blocked' });
     }
 
     const token = await getPushToken(owner.ownerId);

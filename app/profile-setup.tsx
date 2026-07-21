@@ -154,11 +154,17 @@ export default function ProfileSetupScreen() {
       }),
     );
   }
+  // Combined with venmo + cashapp, the saved links array must stay within the
+  // DB cap (profiles_links_count <= 10). Cap social links at 8 so a full
+  // profile can't overflow it and hit an opaque constraint error on save.
+  const MAX_SOCIAL_LINKS = 8;
   function addPlatformLink(platform: LinkPlatform) {
-    setLinks((cur) => [...cur, { label: platform.label, url: '' }]);
+    setLinks((cur) =>
+      cur.length >= MAX_SOCIAL_LINKS ? cur : [...cur, { label: platform.label, url: '' }],
+    );
   }
   function addCustomLink() {
-    setLinks((cur) => [...cur, { label: '', url: '' }]);
+    setLinks((cur) => (cur.length >= MAX_SOCIAL_LINKS ? cur : [...cur, { label: '', url: '' }]));
   }
   function removeLink(i: number) {
     setLinks((cur) => cur.filter((_, idx) => idx !== i));
@@ -312,6 +318,7 @@ export default function ProfileSetupScreen() {
               placeholder="First Last"
               placeholderTextColor={c.textMuted}
               autoCapitalize="words"
+              maxLength={60}
               style={[styles.input, { color: c.text }]}
             />
             <View style={[styles.underline, { backgroundColor: c.border }]} />
@@ -362,6 +369,7 @@ export default function ProfileSetupScreen() {
               onChangeText={setMajor}
               placeholder="Computer Science"
               placeholderTextColor={c.textMuted}
+              maxLength={80}
               style={[styles.input, { color: c.text }]}
             />
             <View style={[styles.underline, { backgroundColor: c.border }]} />
@@ -373,6 +381,7 @@ export default function ProfileSetupScreen() {
               onChangeText={setDorm}
               placeholder="Dillon Hall"
               placeholderTextColor={c.textMuted}
+              maxLength={80}
               style={[styles.input, { color: c.text }]}
             />
             <View style={[styles.underline, { backgroundColor: c.border }]} />
@@ -416,6 +425,7 @@ export default function ProfileSetupScreen() {
                 placeholderTextColor={c.textMuted}
                 autoCapitalize="none"
                 autoCorrect={false}
+                maxLength={32}
                 accessibilityLabel="Venmo handle"
                 style={[styles.input, styles.payInput, { color: c.text }]}
               />
@@ -430,6 +440,7 @@ export default function ProfileSetupScreen() {
                 placeholderTextColor={c.textMuted}
                 autoCapitalize="none"
                 autoCorrect={false}
+                maxLength={32}
                 accessibilityLabel="Cash App cashtag"
                 style={[styles.input, styles.payInput, { color: c.text }]}
               />
@@ -504,6 +515,7 @@ export default function ProfileSetupScreen() {
                         onChangeText={(t) => setLinkLabel(i, t)}
                         placeholder="Label"
                         placeholderTextColor={c.textMuted}
+                        maxLength={40}
                         style={[styles.linkLabelInput, { color: c.text }]}
                       />
                       <TextInput
@@ -514,6 +526,7 @@ export default function ProfileSetupScreen() {
                         autoCapitalize="none"
                         autoCorrect={false}
                         keyboardType="url"
+                        maxLength={300}
                         style={[styles.linkUrlInput, { color: c.textSecondary }]}
                       />
                     </View>

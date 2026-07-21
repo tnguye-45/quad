@@ -1,5 +1,5 @@
 import { router, useLocalSearchParams } from 'expo-router';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   KeyboardAvoidingView,
   Platform,
@@ -30,11 +30,12 @@ const TARGET_KIND_LABELS: Record<string, string> = {
   gig: 'gig',
   hangout: 'hangout',
   voice: 'voice',
+  comment: 'comment',
   message: 'message',
   profile: 'profile',
 };
 
-const VALID_KINDS = ['gig', 'hangout', 'voice', 'message', 'profile'] as const;
+const VALID_KINDS = ['gig', 'hangout', 'voice', 'comment', 'message', 'profile'] as const;
 
 export default function ReportScreen() {
   const c = Colors[useColorScheme() ?? 'light'];
@@ -53,6 +54,11 @@ export default function ReportScreen() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [done, setDone] = useState(false);
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => () => {
+    if (closeTimer.current) clearTimeout(closeTimer.current);
+  }, []);
 
   const canSubmit = !!reason && !!targetKind && !!targetId && !busy;
 
@@ -66,7 +72,7 @@ export default function ReportScreen() {
       // would fail.
       setBusy(false);
       setDone(true);
-      setTimeout(() => router.back(), 900);
+      closeTimer.current = setTimeout(() => router.back(), 900);
       return;
     }
 
@@ -87,11 +93,24 @@ export default function ReportScreen() {
 
     setBusy(false);
     if (error) {
-      setErr(error.message);
+      // 0030's contract: a duplicate is a unique-constraint violation (already
+      // reported) and the rate limit raises 54000. Map both to friendly copy
+      // instead of leaking raw Postgres text; treat a duplicate as success so
+      // re-reporting the same thing isn't a dead end.
+      if (error.code === '23505') {
+        setDone(true);
+        closeTimer.current = setTimeout(() => router.back(), 900);
+        return;
+      }
+      if (error.code === '54000') {
+        setErr("You've reported a lot recently — please try again later.");
+        return;
+      }
+      setErr("Couldn't submit your report. Please try again.");
       return;
     }
     setDone(true);
-    setTimeout(() => router.back(), 900);
+    closeTimer.current = setTimeout(() => router.back(), 900);
   }
 
   if (!targetKind || !targetId) {

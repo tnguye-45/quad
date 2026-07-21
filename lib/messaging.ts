@@ -46,11 +46,13 @@ type GigEmbed = {
   title: string;
   payout_cents: number;
   anonymous: boolean;
+  poster_id: string;
 } | null;
 
 type HangoutEmbed = {
   title: string;
   anonymous: boolean;
+  host_id: string;
 } | null;
 
 type PreviewMessage = {
@@ -182,6 +184,23 @@ function dollars(cents: number): string {
   return `$${Math.round(cents / 100)}`;
 }
 
+// A conversation counterpart must never reveal an anonymous author's identity.
+// Gigs can no longer be DM'd anonymously (0034 refuses it server-side), but an
+// anonymous hangout still forms a group chat with its host — so mask the host
+// (and, defensively, any pre-existing anonymous gig poster) wherever we'd
+// otherwise render their real name/avatar.
+function isAnonymousAuthorMember(conv: ConversationRow, userId: string): boolean {
+  if (conv.gig?.anonymous && conv.gig.poster_id === userId) return true;
+  if (conv.hangout?.anonymous && conv.hangout.host_id === userId) return true;
+  return false;
+}
+
+const MASKED_PARTNER = {
+  name: 'Anonymous',
+  initials: '?',
+  avatarUrl: null as string | null,
+};
+
 function contextLabelFor(conv: ConversationRow): string {
   if (conv.gig) {
     const who = conv.gig.anonymous ? '(anonymous)' : '';
@@ -205,6 +224,12 @@ export function useConversations(): {
   const [rows, setRows] = useState<ConversationSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Every realtime event (INSERT/DELETE/read) triggers a full refetch; a busy
+  // thread can fire several in flight at once. A generation counter makes the
+  // latest fetch the only one allowed to commit, so an older snapshot resolving
+  // late can't overwrite newer state.
+  const fetchGenRef = useRef(0);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const fetchAll = async () => {
     if (!realSession) {
@@ -212,6 +237,7 @@ export function useConversations(): {
       setLoading(false);
       return;
     }
+    const gen = ++fetchGenRef.current;
     setLoading(true);
     setError(null);
     try {
@@ -228,8 +254,10 @@ export function useConversations(): {
       }[];
       const convIds = memberData.map((m) => m.conversation_id);
       if (convIds.length === 0) {
-        setRows([]);
-        setLoading(false);
+        if (fetchGenRef.current === gen) {
+          setRows([]);
+          setLoading(false);
+        }
         return;
       }
 
@@ -240,8 +268,8 @@ export function useConversations(): {
         supabase
           .from('conversations')
           .select(
-            'id, gig_id, hangout_id, gig:gigs(title, payout_cents, anonymous), ' +
-              'hangout:hangouts(title, anonymous), messages(id, sender_id, body, sent_at, image_url)',
+            'id, gig_id, hangout_id, gig:gigs(title, payout_cents, anonymous, poster_id), ' +
+              'hangout:hangouts(title, anonymous, host_id), messages(id, sender_id, body, sent_at, image_url)',
           )
           .in('id', convIds)
           .order('sent_at', { referencedTable: 'messages', ascending: false })
@@ -283,6 +311,10 @@ export function useConversations(): {
           partnerName = `Group · ${partners.length + 1} people`;
           partnerInitials = '··';
           partnerAvatarUrl = null;
+        } else if (partner && isAnonymousAuthorMember(conv, partner.user_id)) {
+          partnerName = MASKED_PARTNER.name;
+          partnerInitials = MASKED_PARTNER.initials;
+          partnerAvatarUrl = MASKED_PARTNER.avatarUrl;
         }
         const lastReadAt = new Date(m.last_read_at).getTime();
         const lastMsgAt = last ? new Date(last.sent_at).getTime() : 0;
@@ -304,31 +336,46 @@ export function useConversations(): {
         };
       });
       summaries.sort((a, b) => b.preview_at - a.preview_at);
+      if (fetchGenRef.current !== gen) return;
       setRows(summaries);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Failed to load conversations.';
       console.warn('[messaging] useConversations failed:', msg);
-      setError(msg);
+      if (fetchGenRef.current === gen) setError(msg);
     } finally {
-      setLoading(false);
+      if (fetchGenRef.current === gen) setLoading(false);
     }
   };
 
   useEffect(() => {
     fetchAll();
     if (!realSession) return;
+    // Coalesce bursts of events (a group chat delivering several messages, or a
+    // read bumping last_read_at) into a single refetch.
+    const scheduleRefetch = () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      debounceRef.current = setTimeout(() => void fetchAll(), 300);
+    };
     const channel = supabase
       .channel(`conv-list:${++channelSeq}`)
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'messages' },
-        () => fetchAll(),
+        scheduleRefetch,
       )
       .on(
         'postgres_changes',
         // Deleting the latest message must refresh the row preview.
         { event: 'DELETE', schema: 'public', table: 'messages' },
-        () => fetchAll(),
+        scheduleRefetch,
+      )
+      .on(
+        'postgres_changes',
+        // Reading a thread bumps my last_read_at; without this the row's unread
+        // flag stayed set until the next message arrived (the badge never
+        // cleared after opening and reading a conversation).
+        { event: 'UPDATE', schema: 'public', table: 'conversation_members' },
+        scheduleRefetch,
       )
       .subscribe((status) => {
         // Fires on every (re)join, not just the first — messages that arrived
@@ -336,6 +383,7 @@ export function useConversations(): {
         if (status === 'SUBSCRIBED') void fetchAll();
       });
     return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
       supabase.removeChannel(channel);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -412,11 +460,9 @@ export function useThread(conversationId: string | undefined): {
   const markRead = useCallback(async () => {
     if (!realSession || !conversationId) return;
     if (!readGateRef.current.focused || !readGateRef.current.appActive) return;
-    await supabase
-      .from('conversation_members')
-      .update({ last_read_at: new Date().toISOString() })
-      .eq('conversation_id', conversationId)
-      .eq('user_id', session!.user.id);
+    // Server stamps last_read_at with now() so it's on the same clock as
+    // sent_at — a skewed device clock no longer strands the unread badge.
+    await supabase.rpc('mark_conversation_read', { p_conversation_id: conversationId });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [realSession, conversationId, session?.user.id]);
 
@@ -471,8 +517,8 @@ export function useThread(conversationId: string | undefined): {
             .from('conversations')
             .select(`
               id, gig_id, hangout_id,
-              gig:gigs(title, payout_cents, anonymous),
-              hangout:hangouts(title, anonymous)
+              gig:gigs(title, payout_cents, anonymous, poster_id),
+              hangout:hangouts(title, anonymous, host_id)
             `)
             .eq('id', conversationId)
             .maybeSingle(),
@@ -499,21 +545,39 @@ export function useThread(conversationId: string | undefined): {
         setMessages(
           ((msgsRes.data ?? []) as unknown as MessageRow[]).map(messageFromRow).reverse(),
         );
+        const convRow = (convRes.data ?? null) as unknown as ConversationRow | null;
         const partner = (partnerRes.data ?? [])[0] as unknown as
-          | { user: ProfileEmbed }
+          | { user_id: string; user: ProfileEmbed }
           | undefined;
-        if (partner?.user) {
+        const partnerIsAnon =
+          !!partner && !!convRow && isAnonymousAuthorMember(convRow, partner.user_id);
+        if (partnerIsAnon) {
+          // Anonymous hangout host: never surface their real identity in the
+          // chat header.
+          setPartnerName(MASKED_PARTNER.name);
+          setPartnerInitials(MASKED_PARTNER.initials);
+          setPartnerAvatarUrl(MASKED_PARTNER.avatarUrl);
+        } else if (partner?.user) {
           setPartnerName(partner.user.display_name ?? 'Unknown');
           setPartnerInitials(partner.user.initials ?? '?');
           setPartnerAvatarUrl(partner.user.avatar_url ?? null);
         }
-        // Read my own profile name once for typing-presence display.
-        const { data: meProf } = await supabase
-          .from('profiles')
-          .select('display_name')
-          .eq('id', session!.user.id)
-          .maybeSingle();
-        myDisplayNameRef.current = meProf?.display_name ?? null;
+        // Read my own profile name once for typing-presence display — but if
+        // I'm the anonymous author of this conversation (anonymous hangout
+        // host), broadcast no name, or the typing indicator would leak it as
+        // "<real name> is typing…". A null name renders as "Someone".
+        const meIsAnon =
+          !!convRow && isAnonymousAuthorMember(convRow, session!.user.id);
+        if (meIsAnon) {
+          myDisplayNameRef.current = null;
+        } else {
+          const { data: meProf } = await supabase
+            .from('profiles')
+            .select('display_name')
+            .eq('id', session!.user.id)
+            .maybeSingle();
+          myDisplayNameRef.current = meProf?.display_name ?? null;
+        }
 
         // Hydrate other members' last_read_at first (so "Read" doesn't flicker),
         // then bump my own last_read_at to "now" so the partner sees we caught up.

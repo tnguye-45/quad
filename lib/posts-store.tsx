@@ -417,6 +417,11 @@ export function PostsProvider({ children }: { children: ReactNode }) {
   // Hangouts the user has already joined — rsvpHangout no-ops for these.
   const [myRsvps, setMyRsvps] = useState<Record<string, true>>({});
   const rsvpInFlightRef = useRef<Set<string>>(new Set());
+  // Per-voice vote serialization: only one set_voice_vote RPC is in flight per
+  // voice at a time, and the latest desired target is remembered so rapid
+  // up→clear taps can't land server-side out of order.
+  const voteSyncingRef = useRef<Set<string>>(new Set());
+  const voteTargetRef = useRef<Map<string, 1 | -1 | 0>>(new Map());
   // Guards so a fast-flick on a FlatList doesn't fire overlapping loadMore
   // round-trips — onEndReached fires multiple times per scroll on iOS.
   const loadingMoreRef = useRef<{ gigs: boolean; hangouts: boolean; voices: boolean }>({
@@ -501,16 +506,28 @@ export function PostsProvider({ children }: { children: ReactNode }) {
         hangouts: hangoutsData.length === PAGE_SIZE,
         voices: voicesData.length === PAGE_SIZE,
       });
-      const voteMap: Record<string, 1 | -1> = {};
-      for (const v of votesRes.data ?? []) {
-        voteMap[v.voice_id] = v.value === 1 ? 1 : -1;
+      // votes/rsvps are secondary to the feed, so a failure here shouldn't blank
+      // the feed — but it also must not overwrite the existing highlight maps
+      // with {}. Skip the update on error and keep what we had; the RSVP guard
+      // (myRsvps) and vote highlights survive a flaky refresh.
+      if (votesRes.error) {
+        console.warn('[posts-store] vote fetch failed:', votesRes.error.message);
+      } else {
+        const voteMap: Record<string, 1 | -1> = {};
+        for (const v of votesRes.data ?? []) {
+          voteMap[v.voice_id] = v.value === 1 ? 1 : -1;
+        }
+        setMyVotes(voteMap);
       }
-      setMyVotes(voteMap);
-      const rsvpMap: Record<string, true> = {};
-      for (const r of (rsvpRes.data ?? []) as { hangout_id: string }[]) {
-        rsvpMap[r.hangout_id] = true;
+      if (rsvpRes.error) {
+        console.warn('[posts-store] rsvp fetch failed:', rsvpRes.error.message);
+      } else {
+        const rsvpMap: Record<string, true> = {};
+        for (const r of (rsvpRes.data ?? []) as { hangout_id: string }[]) {
+          rsvpMap[r.hangout_id] = true;
+        }
+        setMyRsvps(rsvpMap);
       }
-      setMyRsvps(rsvpMap);
     } catch (e: unknown) {
       if (fetchGenRef.current !== gen) return;
       const msg = e instanceof Error ? e.message : 'Failed to load posts.';
@@ -944,26 +961,56 @@ export function PostsProvider({ children }: { children: ReactNode }) {
 
     if (!realSession) return;
 
-    // Single atomic RPC — `set_voice_vote` handles delete vs upsert in one
-    // transaction so rapid up→down taps can't reorder server-side.
-    const { error: voteErr } = await supabase.rpc('set_voice_vote', {
-      p_voice_id: id,
-      p_value: target,
+    // Record the desired end-state and serialize the server sync per voice.
+    // set_voice_vote is atomic on its own, but two overlapping RPCs (up, then
+    // up-again-to-clear) could still commit out of order and leave the server
+    // at the wrong value. Draining one-at-a-time to the LATEST target prevents
+    // that; a tap that arrives mid-flight just updates the target the running
+    // loop will send next.
+    voteTargetRef.current.set(id, target);
+    if (voteSyncingRef.current.has(id)) return;
+    voteSyncingRef.current.add(id);
+    try {
+      while (voteTargetRef.current.has(id)) {
+        const desired = voteTargetRef.current.get(id)!;
+        voteTargetRef.current.delete(id);
+        const { error: voteErr } = await supabase.rpc('set_voice_vote', {
+          p_voice_id: id,
+          p_value: desired,
+        });
+        if (voteErr) {
+          console.warn('[posts-store] voteVoice failed:', voteErr.message);
+          // Reconcile from server truth rather than replaying an inverse delta
+          // — after several taps the delta no longer describes the divergence.
+          voteTargetRef.current.delete(id);
+          await reconcileVoteFromServer(id);
+          setError(voteErr.message);
+          break;
+        }
+      }
+    } finally {
+      voteSyncingRef.current.delete(id);
+    }
+  }
+
+  async function reconcileVoteFromServer(id: string) {
+    if (!session) return;
+    const me = session.user.id;
+    const [voteRes, feedRes] = await Promise.all([
+      supabase.from('voice_votes').select('value').eq('user_id', me).eq('voice_id', id).maybeSingle(),
+      supabase.from('voices_feed').select('vote_score').eq('id', id).maybeSingle(),
+    ]);
+    const serverValue = (voteRes.data as { value: number } | null)?.value;
+    setMyVotes((cur) => {
+      const nextMap = { ...cur };
+      if (serverValue === 1) nextMap[id] = 1;
+      else if (serverValue === -1) nextMap[id] = -1;
+      else delete nextMap[id];
+      return nextMap;
     });
-    if (voteErr) {
-      // Roll back both the score and the highlight so the UI doesn't diverge
-      // from the server on a failed write.
-      console.warn('[posts-store] voteVoice failed:', voteErr.message);
-      setVoices((cur) =>
-        cur.map((v) => (v.id === id ? { ...v, votes: v.votes - delta } : v)),
-      );
-      setMyVotes((cur) => {
-        const nextMap = { ...cur };
-        if (previous === 0) delete nextMap[id];
-        else nextMap[id] = previous;
-        return nextMap;
-      });
-      setError(voteErr.message);
+    const score = (feedRes.data as { vote_score: number } | null)?.vote_score;
+    if (typeof score === 'number') {
+      setVoices((cur) => cur.map((v) => (v.id === id ? { ...v, votes: score } : v)));
     }
   }
 

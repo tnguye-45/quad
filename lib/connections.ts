@@ -232,6 +232,10 @@ export async function fetchOrbitSources(me: Profile): Promise<OrbitSources> {
       .eq("accepted_by", me.id),
   ]);
   if (convRes.error) throw convRes.error;
+  // The block list gates who may appear on the orbit graph. If it fails we must
+  // NOT silently fall back to an empty list — that would surface a blocked user
+  // as a node. Fail the whole graph instead (the caller shows a retry).
+  if (blocksRes.error) throw blocksRes.error;
 
   const convs = (convRes.data ?? []) as {
     id: string;

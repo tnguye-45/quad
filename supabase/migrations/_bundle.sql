@@ -1,7 +1,7 @@
 -- ═══════════════════════════════════════════════════════════════════════════
 -- quad — GENERATED migration bundle. DO NOT EDIT BY HAND.
 -- Regenerate with: node supabase/scripts/generate-bundle.mjs
--- Contains, in order: 0001, 0002, 0003, 0004, 0005, 0006, 0007, 0008, 0009, 0010, 0011, 0012, 0013, 0014, 0015, 0016, 0017, 0018, 0019, 0020, 0021, 0022, 0023, 0024, 0025, 0026, 0027, 0028, 0029, 0030, 0031, 0032
+-- Contains, in order: 0001, 0002, 0003, 0004, 0005, 0006, 0007, 0008, 0009, 0010, 0011, 0012, 0013, 0014, 0015, 0016, 0017, 0018, 0019, 0020, 0021, 0022, 0023, 0024, 0025, 0026, 0027, 0028, 0029, 0030, 0031, 0032, 0033, 0034
 -- ═══════════════════════════════════════════════════════════════════════════
 
 -- ═══════════════ 0001_schema.sql ═══════════════
@@ -2684,3 +2684,207 @@ alter table public.hangouts
 alter table public.hangouts
   add constraint hangouts_description_len
   check (description is null or char_length(description) <= 2000) not valid;
+
+-- ═══════════════ 0033_membership_lock_and_comment_reports.sql ═══════════════
+
+-- quad — lock conversation membership rewrites (fixes C1) + report comments
+-- (fixes H4)
+--
+-- C1: the "conversation_members: update own" policy (0002) only pins
+-- user_id = auth.uid() in USING/WITH CHECK; it never pins conversation_id.
+-- Row-level policies cannot restrict WHICH COLUMNS change, so a member could
+-- PATCH their own row's conversation_id to any other thread's uuid — USING
+-- matches their old row, WITH CHECK still sees user_id = me, so it passes —
+-- and thereby read (and, post-0029, send into) a conversation they were never
+-- invited to. This re-opened via UPDATE the membership-forgery hole 0023 shut
+-- for INSERT. Fix at the privilege layer instead of the policy layer: a
+-- column-level UPDATE grant makes last_read_at the ONLY updatable column, so
+-- the PK columns can no longer be rewritten by anyone. The row-scoping policy
+-- from 0002 still applies on top.
+revoke update on public.conversation_members from authenticated;
+grant update (last_read_at) on public.conversation_members to authenticated;
+
+-- H4: reports had no `comment` target kind, so the client filed a reported
+-- comment against its PARENT POST and attached the comment author as
+-- target_user_id — which 0030's trigger then OVERWRITES with the parent post's
+-- author ("never trust the client"). Net effect: reporting a harassing comment
+-- pinned the report on the innocent post owner and recorded nothing about which
+-- comment was reported. Add a first-class `comment` kind resolved server-side.
+alter type public.report_target_kind add value if not exists 'comment';
+
+-- Re-create the resolver with a comments branch. Body otherwise identical to
+-- 0030 (rate limit + server-authoritative target_user_id).
+create or replace function public.reports_resolve_target()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_author uuid;
+begin
+  if (select count(*) from public.reports
+       where reporter_id = new.reporter_id
+         and created_at > now() - interval '1 hour') >= 20 then
+    raise exception 'too many reports; please try again later'
+      using errcode = '54000';
+  end if;
+
+  if new.target_kind = 'gig' then
+    select poster_id into v_author from public.gigs     where id = new.target_id;
+  elsif new.target_kind = 'hangout' then
+    select host_id   into v_author from public.hangouts where id = new.target_id;
+  elsif new.target_kind = 'voice' then
+    select author_id into v_author from public.voices   where id = new.target_id;
+  elsif new.target_kind = 'comment' then
+    select author_id into v_author from public.comments where id = new.target_id;
+  elsif new.target_kind = 'message' then
+    select sender_id into v_author from public.messages where id = new.target_id;
+  elsif new.target_kind = 'profile' then
+    select id        into v_author from public.profiles where id = new.target_id;
+  end if;
+
+  if v_author is null then
+    raise exception 'report target not found' using errcode = 'P0002';
+  end if;
+
+  -- Never trust the client's value.
+  new.target_user_id := v_author;
+  return new;
+end;
+$$;
+
+revoke all on function public.reports_resolve_target() from public;
+
+-- ═══════════════ 0034_anon_dm_lockdown_read_rpc_profile_limits.sql ═══════════════
+
+-- quad — server-enforce "no DMing anonymous gig posters" (H1), server-clock
+-- read receipts (M3), and profile length limits (M8).
+--
+-- H1: the feed masks an anonymous gig's poster_id (0027), but any authenticated
+-- user could still call start_gig_conversation(anon_gig) — which seeds the
+-- poster as a readable conversation_members row — and join it to profiles to
+-- recover the poster's real identity: a one-RPC, no-consent mass de-anonymizer.
+-- The CLIENT already forbids messaging anonymous posters (app/gig/[id].tsx:
+-- `canMessage = !isOwn && !gig.anonymous && …`); this makes the server enforce
+-- the same rule instead of trusting the UI. (Anonymous hangouts still form a
+-- group chat with the host — attendees are meeting them in person — so the
+-- client masks the host's identity in that chat rather than blocking the join.)
+create or replace function public.start_gig_conversation(p_gig_id uuid)
+returns uuid
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_me        uuid := auth.uid();
+  v_poster    uuid;
+  v_anon      boolean;
+  v_conv_id   uuid;
+begin
+  if v_me is null then
+    raise exception 'not authenticated' using errcode = '28000';
+  end if;
+
+  select poster_id, anonymous into v_poster, v_anon
+    from public.gigs where id = p_gig_id;
+  if v_poster is null then
+    raise exception 'gig not found' using errcode = 'P0002';
+  end if;
+
+  if v_poster = v_me then
+    raise exception 'cannot message yourself' using errcode = '22023';
+  end if;
+
+  -- Anonymous posters are unreachable by DM — messaging them would leak the
+  -- identity the anonymous flag exists to protect.
+  if v_anon then
+    raise exception 'this poster cannot be messaged' using errcode = '42501';
+  end if;
+
+  -- Either side of a block relationship kills the thread before it starts.
+  if public.is_blocked(v_poster) then
+    raise exception 'you cannot message this user' using errcode = '42501';
+  end if;
+
+  -- Reuse an existing 1:1 thread between exactly these two for this gig.
+  select c.id into v_conv_id
+    from public.conversations c
+    join public.conversation_members m1 on m1.conversation_id = c.id and m1.user_id = v_me
+    join public.conversation_members m2 on m2.conversation_id = c.id and m2.user_id = v_poster
+   where c.gig_id = p_gig_id
+   limit 1;
+
+  if v_conv_id is null then
+    insert into public.conversations (gig_id) values (p_gig_id)
+      returning id into v_conv_id;
+    insert into public.conversation_members (conversation_id, user_id)
+      values (v_conv_id, v_me), (v_conv_id, v_poster)
+      on conflict do nothing;
+  else
+    -- Defensive: heal a half-membered conversation (shouldn't happen).
+    insert into public.conversation_members (conversation_id, user_id)
+      values (v_conv_id, v_me), (v_conv_id, v_poster)
+      on conflict do nothing;
+  end if;
+
+  return v_conv_id;
+end;
+$$;
+
+revoke all on function public.start_gig_conversation(uuid) from public;
+grant execute on function public.start_gig_conversation(uuid) to authenticated;
+
+-- M3: mark-as-read used the CLIENT clock (new Date().toISOString()) written to
+-- last_read_at, then compared against server-generated sent_at. A device clock
+-- skewed slow leaves a thread stuck "unread" forever; skewed fast marks unseen
+-- messages read. Stamp last_read_at with the SERVER clock via a definer RPC so
+-- it's always on the same timeline as sent_at. (Definer also sidesteps the
+-- column-level UPDATE grant from 0033 — though it only writes last_read_at.)
+create or replace function public.mark_conversation_read(p_conversation_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  update public.conversation_members
+     set last_read_at = now()
+   where conversation_id = p_conversation_id
+     and user_id = auth.uid();
+end;
+$$;
+
+revoke all on function public.mark_conversation_read(uuid) from public;
+grant execute on function public.mark_conversation_read(uuid) to authenticated;
+
+-- M8: profiles shipped with unbounded text columns (only bio was capped, and
+-- only client-side). display_name is joined into every feed/comment/message
+-- row via the 0027 views, so a 1 MB name is a feed-wide DoS — the same class
+-- 0032 fixed for gigs/hangouts. Mirror those limits here, and cap the links
+-- array so it can't grow without bound. NOT VALID binds new/updated rows
+-- immediately while skipping a scan of existing rows (see 0032 for the
+-- validate-after-deploy step).
+alter table public.profiles
+  add constraint profiles_display_name_len
+  check (display_name is null or char_length(display_name) <= 60) not valid;
+
+alter table public.profiles
+  add constraint profiles_initials_len
+  check (initials is null or char_length(initials) <= 8) not valid;
+
+alter table public.profiles
+  add constraint profiles_major_len
+  check (major is null or char_length(major) <= 80) not valid;
+
+alter table public.profiles
+  add constraint profiles_dorm_len
+  check (dorm is null or char_length(dorm) <= 80) not valid;
+
+alter table public.profiles
+  add constraint profiles_bio_len
+  check (bio is null or char_length(bio) <= 240) not valid;
+
+alter table public.profiles
+  add constraint profiles_links_count
+  check (jsonb_array_length(links) <= 10) not valid;

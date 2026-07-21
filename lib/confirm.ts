@@ -45,3 +45,20 @@ export function confirmAsync(opts: {
     ]);
   });
 }
+
+/**
+ * Cross-platform one-button notice. Same rationale as `confirmAsync`:
+ * `Alert.alert` is a no-op on react-native-web, so an error/permission notice
+ * shown that way is invisible on the web build. Falls back to `window.alert`.
+ */
+export function notify(opts: { title: string; message?: string }): void {
+  const { title, message } = opts;
+  if (Platform.OS === 'web') {
+    const text = message ? `${title}\n\n${message}` : title;
+    if (typeof globalThis !== 'undefined' && typeof globalThis.alert === 'function') {
+      globalThis.alert(text);
+    }
+    return;
+  }
+  Alert.alert(title, message);
+}

@@ -34,6 +34,7 @@ import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useAuth } from '@/lib/auth-context';
+import { confirmAsync, notify } from '@/lib/confirm';
 import { useDevConversations, type DevConversation } from '@/lib/dev-conversations';
 import {
   useThread,
@@ -204,24 +205,18 @@ function RealChat({
       return next;
     });
   }
-  function confirmDeleteSelected() {
+  async function confirmDeleteSelected() {
     if (!selected || selected.size === 0) return;
     const n = selected.size;
-    Alert.alert(
-      n === 1 ? 'Delete message?' : `Delete ${n} messages?`,
-      'This removes them for everyone in this chat.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            const ok = await deleteMessages([...selected]);
-            if (ok) setSelected(null);
-          },
-        },
-      ],
-    );
+    const confirmed = await confirmAsync({
+      title: n === 1 ? 'Delete message?' : `Delete ${n} messages?`,
+      message: 'This removes them for everyone in this chat.',
+      confirmLabel: 'Delete',
+      destructive: true,
+    });
+    if (!confirmed) return;
+    const ok = await deleteMessages([...selected]);
+    if (ok) setSelected(null);
   }
 
   useEffect(() => {
@@ -242,7 +237,7 @@ function RealChat({
       const out = await uploadMessageImage(userId, pendingImage);
       setUploading(false);
       if ('error' in out) {
-        Alert.alert("Couldn't send image", out.error);
+        notify({ title: "Couldn't send image", message: out.error });
         return;
       }
       setPendingImage(null);
@@ -266,7 +261,10 @@ function RealChat({
   async function pickFromLibrary() {
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!perm.granted) {
-      Alert.alert('Photo access needed', 'Allow photo access in Settings to send images.');
+      notify({
+        title: 'Photo access needed',
+        message: 'Allow photo access in Settings to send images.',
+      });
       return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -282,7 +280,10 @@ function RealChat({
   async function pickFromCamera() {
     const perm = await ImagePicker.requestCameraPermissionsAsync();
     if (!perm.granted) {
-      Alert.alert('Camera access needed', 'Allow camera access in Settings to send photos.');
+      notify({
+        title: 'Camera access needed',
+        message: 'Allow camera access in Settings to send photos.',
+      });
       return;
     }
     const result = await ImagePicker.launchCameraAsync({
@@ -307,6 +308,11 @@ function RealChat({
           else if (idx === 2) pickFromLibrary();
         },
       );
+    } else if (Platform.OS === 'web') {
+      // Alert.alert is a no-op on web, so the action sheet never appears and
+      // attaching is dead. There's no camera picker on web anyway — go straight
+      // to the library chooser.
+      pickFromLibrary();
     } else {
       Alert.alert('Add a photo', undefined, [
         { text: 'Cancel', style: 'cancel' },
@@ -341,6 +347,16 @@ function RealChat({
                 // hangout group chat the menu is report-only.
                 otherUserId={otherReads.length === 1 ? otherReads[0].userId : ''}
                 otherUserName={otherReads.length === 1 ? partnerName : undefined}
+                // Report a real target: the counterpart's profile in a 1:1
+                // thread, the hangout in a group chat. (The old default —
+                // targetKind "message" + a conversation id — always failed the
+                // server resolver, which expects a message id.)
+                targetKind={otherReads.length === 1 ? 'profile' : 'hangout'}
+                targetId={
+                  otherReads.length === 1
+                    ? otherReads[0].userId
+                    : conversation?.hangout_id ?? ''
+                }
               />
             }
           />
@@ -775,24 +791,18 @@ function DevChat({
       return next;
     });
   }
-  function confirmDeleteSelected() {
+  async function confirmDeleteSelected() {
     if (!selected || selected.size === 0) return;
     const n = selected.size;
-    Alert.alert(
-      n === 1 ? 'Delete message?' : `Delete ${n} messages?`,
-      'This removes them for everyone in this chat.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: () => {
-            deleteMessages(conversationId, [...selected]);
-            setSelected(null);
-          },
-        },
-      ],
-    );
+    const confirmed = await confirmAsync({
+      title: n === 1 ? 'Delete message?' : `Delete ${n} messages?`,
+      message: 'This removes them for everyone in this chat.',
+      confirmLabel: 'Delete',
+      destructive: true,
+    });
+    if (!confirmed) return;
+    deleteMessages(conversationId, [...selected]);
+    setSelected(null);
   }
 
   // Clear the unread dot once the thread is open.

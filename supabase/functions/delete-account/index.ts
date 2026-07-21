@@ -45,10 +45,20 @@ const SERVICE_ROLE_KEY =
   Deno.env.get('SERVICE_ROLE_KEY') ??
   '';
 
+// The hosted web build runs on a different origin (github.io) from the
+// function (supabase.co), so EVERY response — not just the OPTIONS preflight —
+// needs CORS headers. Without them the browser rejects the POST response, and
+// the client reports "delete failed" even though the account was destroyed.
+const CORS_HEADERS: Record<string, string> = {
+  'access-control-allow-origin': '*',
+  'access-control-allow-methods': 'POST, OPTIONS',
+  'access-control-allow-headers': 'authorization, content-type',
+};
+
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', ...CORS_HEADERS },
   });
 }
 
@@ -97,7 +107,11 @@ async function pgDelete(table: string, filter: string): Promise<void> {
 // fully cleaned up. The iteration cap only guards against a delete call that
 // silently removes nothing; 200 pages × 100 objects is far beyond any real
 // account.
-async function deleteBucketObjects(bucket: string, userId: string): Promise<void> {
+// Returns true only if the prefix was fully cleaned. A false return means an
+// object may survive as a public URL, so the caller must NOT proceed to the
+// irreversible auth delete (the user would lose their JWT and could never
+// retry the cleanup).
+async function deleteBucketObjects(bucket: string, userId: string): Promise<boolean> {
   try {
     for (let page = 0; page < 200; page++) {
       const listRes = await fetch(`${SUPABASE_URL}/storage/v1/object/list/${bucket}`, {
@@ -112,10 +126,10 @@ async function deleteBucketObjects(bucket: string, userId: string): Promise<void
       if (!listRes.ok) {
         const txt = await listRes.text();
         console.warn(`${bucket} list failed: ${listRes.status} ${txt}`);
-        return;
+        return false;
       }
       const items = (await listRes.json()) as { name: string }[];
-      if (!Array.isArray(items) || items.length === 0) return;
+      if (!Array.isArray(items) || items.length === 0) return true;
       const paths = items.map((i) => `${userId}/${i.name}`);
       const delRes = await fetch(`${SUPABASE_URL}/storage/v1/object/${bucket}`, {
         method: 'DELETE',
@@ -129,12 +143,14 @@ async function deleteBucketObjects(bucket: string, userId: string): Promise<void
       if (!delRes.ok) {
         const txt = await delRes.text();
         console.warn(`${bucket} delete failed: ${delRes.status} ${txt}`);
-        return;
+        return false;
       }
     }
     console.warn(`${bucket} cleanup hit the page cap for user ${userId}`);
+    return false;
   } catch (err) {
     console.warn(`${bucket} cleanup threw`, err);
+    return false;
   }
 }
 
@@ -155,14 +171,7 @@ async function deleteAuthUser(userId: string): Promise<{ ok: boolean; error?: st
 
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
-    return new Response(null, {
-      status: 204,
-      headers: {
-        'access-control-allow-origin': '*',
-        'access-control-allow-methods': 'POST, OPTIONS',
-        'access-control-allow-headers': 'authorization, content-type',
-      },
-    });
+    return new Response(null, { status: 204, headers: CORS_HEADERS });
   }
   if (req.method !== 'POST') {
     return json(405, { error: 'method not allowed' });
@@ -183,9 +192,36 @@ Deno.serve(async (req: Request) => {
   const uidEq = `user_id=eq.${encodeURIComponent(uid)}`;
 
   try {
-    // Order matters: kill leaves before the trunk. Most tables cascade from
-    // auth.users delete, but doing it explicitly makes failure modes obvious
-    // and gives the FK cascades less work.
+    // Ordering rationale (fixes the "partial-delete" failure modes):
+    //
+    //  1) Storage FIRST, and abort if it doesn't fully clean. Both buckets are
+    //     public and keyed by `{uid}/...`; a surviving object is addressable by
+    //     URL forever (5.1.1(v) exposure). Because the auth delete below revokes
+    //     the caller's JWT, a user can never re-invoke this function — so a
+    //     storage failure must stop us BEFORE the point of no return, leaving
+    //     the account intact and the request safely retriable.
+    const avatarsOk = await deleteBucketObjects('avatars', uid);
+    const imagesOk = await deleteBucketObjects('message-images', uid);
+    if (!avatarsOk || !imagesOk) {
+      return json(500, {
+        error: 'storage cleanup incomplete; account not deleted — please retry',
+      });
+    }
+
+    //  2) Delete the auth user. profiles references auth.users ON DELETE
+    //     CASCADE, and every content table references profiles ON DELETE
+    //     CASCADE, so this single call removes all of the user's DB rows
+    //     atomically. It is the point of no return AND the must-succeed step:
+    //     if it fails, no DB content has been touched, so the account stays
+    //     coherent and the user can retry.
+    const authResult = await deleteAuthUser(uid);
+    if (!authResult.ok) {
+      return json(500, { error: authResult.error ?? 'auth delete failed' });
+    }
+
+    //  3) Best-effort sweep of anything that somehow didn't cascade (idempotent
+    //     — the rows are already gone in the normal case). Failures here are
+    //     logged, not fatal: the account itself is already deleted.
     await pgDelete('voice_votes', uidEq);
     await pgDelete('voices', `author_id=eq.${encodeURIComponent(uid)}`);
     await pgDelete('hangout_attendees', uidEq);
@@ -194,25 +230,11 @@ Deno.serve(async (req: Request) => {
     await pgDelete('gigs', `poster_id=eq.${encodeURIComponent(uid)}`);
     await pgDelete('hangouts', `host_id=eq.${encodeURIComponent(uid)}`);
     await pgDelete('reports', `reporter_id=eq.${encodeURIComponent(uid)}`);
-    // user_blocks: two FKs, two deletes.
     await pgDelete('user_blocks', `blocker_id=eq.${encodeURIComponent(uid)}`);
     await pgDelete('user_blocks', `blocked_id=eq.${encodeURIComponent(uid)}`);
     await pgDelete('notification_prefs', uidEq);
     await pgDelete('user_push_tokens', uidEq);
-
-    // Both public buckets are keyed by `{uid}/...` — message images are
-    // publicly addressable forever if we skip them here (5.1.1(v) exposure).
-    await deleteBucketObjects('avatars', uid);
-    await deleteBucketObjects('message-images', uid);
-
-    // profiles cascades from auth.users, but explicit delete protects against
-    // the rare case where auth delete partially fails.
     await pgDelete('profiles', `id=eq.${encodeURIComponent(uid)}`);
-
-    const authResult = await deleteAuthUser(uid);
-    if (!authResult.ok) {
-      return json(500, { error: authResult.error ?? 'auth delete failed' });
-    }
 
     return json(200, { ok: true });
   } catch (err) {

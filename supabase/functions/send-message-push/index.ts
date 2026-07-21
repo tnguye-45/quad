@@ -146,19 +146,26 @@ async function buildNotificationFields(message: MessageRow): Promise<{
   const senderName = senderRows[0]?.display_name ?? 'Someone';
 
   const convRows = await pgSelect<{
-    gig: { title: string } | null;
-    hangout: { title: string } | null;
+    gig: { title: string; anonymous: boolean; poster_id: string } | null;
+    hangout: { title: string; anonymous: boolean; host_id: string } | null;
   }>(
     `conversations?id=eq.${encodeURIComponent(
       message.conversation_id,
-    )}&select=gig:gigs(title),hangout:hangouts(title)`,
+    )}&select=gig:gigs(title,anonymous,poster_id),hangout:hangouts(title,anonymous,host_id)`,
   ).catch(() => [] as never[]);
   const conv = convRows[0];
-  let title = senderName;
+  // If the sender authored the linked gig/hangout anonymously, their real name
+  // must never reach the recipient's lock screen — that would break the
+  // anonymity 0027 enforces everywhere else. Fall back to a neutral label.
+  const senderIsAnonAuthor =
+    (conv?.gig?.anonymous && conv.gig.poster_id === message.sender_id) ||
+    (conv?.hangout?.anonymous && conv.hangout.host_id === message.sender_id);
+  const displayName = senderIsAnonAuthor ? 'Someone' : senderName;
+  let title = displayName;
   if (conv?.gig?.title) {
-    title = `${senderName} · ${conv.gig.title}`;
+    title = `${displayName} · ${conv.gig.title}`;
   } else if (conv?.hangout?.title) {
-    title = `${senderName} · ${conv.hangout.title}`;
+    title = `${displayName} · ${conv.hangout.title}`;
   }
   // Image-only messages get a glyphed placeholder body so the notification
   // doesn't render as an empty string. Text messages get a clipped body.

@@ -170,6 +170,8 @@ type DevConversationsApi = {
   joinHangoutConversation: (hangout: Hangout) => string;
   /** Append a message from "me" and schedule a canned reply. */
   sendMessage: (conversationId: string, text: string) => void;
+  /** Remove my own messages from a thread (mirrors the real delete path). */
+  deleteMessages: (conversationId: string, messageIds: string[]) => void;
   markRead: (conversationId: string) => void;
 };
 
@@ -299,6 +301,23 @@ export function DevConversationsProvider({ children }: { children: ReactNode }) 
     }, 1100);
   }, []);
 
+  const deleteMessages = useCallback((conversationId: string, messageIds: string[]) => {
+    if (messageIds.length === 0) return;
+    setConversations((cur) =>
+      cur.map((c) =>
+        c.id === conversationId
+          ? {
+              ...c,
+              // Same rule as the real path: you can only delete your own.
+              messages: c.messages.filter(
+                (m) => m.from !== 'me' || !messageIds.includes(m.id),
+              ),
+            }
+          : c,
+      ),
+    );
+  }, []);
+
   const value = useMemo<DevConversationsApi>(
     () => ({
       conversations,
@@ -306,9 +325,10 @@ export function DevConversationsProvider({ children }: { children: ReactNode }) 
       startGigConversation,
       joinHangoutConversation,
       sendMessage,
+      deleteMessages,
       markRead,
     }),
-    [conversations, getConversation, startGigConversation, joinHangoutConversation, sendMessage, markRead],
+    [conversations, getConversation, startGigConversation, joinHangoutConversation, sendMessage, deleteMessages, markRead],
   );
 
   return (

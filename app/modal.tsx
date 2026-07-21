@@ -16,7 +16,7 @@ import {
   type Hangout,
   type Voice,
 } from '@/lib/posts-store';
-import { linkEmoji } from '@/lib/profile-links';
+import { isPaymentLink, linkEmoji, paymentHandleFromUrl } from '@/lib/profile-links';
 
 function normalizeUrl(raw: string): string {
   return raw.match(/^https?:\/\//i) ? raw : `https://${raw}`;
@@ -65,6 +65,9 @@ export default function MeModal() {
   const totalPosts =
     myPosts.gigs.length + myPosts.hangouts.length + myPosts.voices.length;
 
+  const paymentLinks = profile.links.filter((l: ProfileLink) => isPaymentLink(l.url));
+  const socialLinks = profile.links.filter((l: ProfileLink) => !isPaymentLink(l.url));
+
   return (
     <ThemedView style={[styles.screen, { backgroundColor: c.background }]}>
       <ScrollView
@@ -109,13 +112,49 @@ export default function MeModal() {
           </View>
         ) : null}
 
-        {profile.links.length > 0 ? (
+        {paymentLinks.length > 0 ? (
+          <View style={[styles.section, { borderTopColor: c.border }]}>
+            <ThemedText style={[styles.sectionLabel, { color: c.textMuted }]} type="mono">
+              payments
+            </ThemedText>
+            <View style={styles.linksList}>
+              {paymentLinks.map((l: ProfileLink, i: number) => (
+                <Pressable
+                  key={`${l.url}-${i}`}
+                  onPress={() => openLink(l.url)}
+                  accessibilityRole="button"
+                  style={({ pressed }) => [
+                    styles.linkRow,
+                    {
+                      borderBottomColor: c.border,
+                      opacity: pressed ? 0.5 : 1,
+                    },
+                  ]}>
+                  <ThemedText style={styles.linkEmoji}>{linkEmoji(l.label, l.url)}</ThemedText>
+                  <View style={styles.linkText}>
+                    <ThemedText style={[styles.linkLabel, { color: c.text }]}>
+                      {l.label}
+                    </ThemedText>
+                    <ThemedText
+                      numberOfLines={1}
+                      style={[styles.linkUrl, { color: c.textMuted }]}
+                      type="mono">
+                      {paymentHandleFromUrl(l.url) ?? l.url.replace(/^https?:\/\//i, '')}
+                    </ThemedText>
+                  </View>
+                </Pressable>
+              ))}
+            </View>
+          </View>
+        ) : null}
+
+        {socialLinks.length > 0 ? (
           <View style={[styles.section, { borderTopColor: c.border }]}>
             <ThemedText style={[styles.sectionLabel, { color: c.textMuted }]} type="mono">
               links
             </ThemedText>
             <View style={styles.linksList}>
-              {profile.links.map((l: ProfileLink, i: number) => (
+              {socialLinks.map((l: ProfileLink, i: number) => (
                 <Pressable
                   key={`${l.url}-${i}`}
                   onPress={() => openLink(l.url)}

@@ -89,6 +89,13 @@ export const PLATFORMS: Platform[] = [
     placeholder: 'https://venmo.com/u/your-handle',
   },
   {
+    id: 'cashapp',
+    label: 'Cash App',
+    emoji: '💵',
+    hosts: ['cash.app'],
+    placeholder: 'https://cash.app/$yourcashtag',
+  },
+  {
     id: 'website',
     label: 'Website',
     emoji: '🌐',
@@ -146,4 +153,51 @@ export function linkEmoji(label: string, url: string): string {
   const labeled = platformByLabel(label);
   if (labeled) return labeled.emoji;
   return '🔗';
+}
+
+// ─────────────────────── payment handles ───────────────────────
+// Venmo and Cash App get first-class handle inputs on profile setup instead of
+// raw URL rows. They still persist inside the same `links` array so no schema
+// change is needed — these helpers convert handle ↔ URL.
+
+export type PaymentPlatformId = 'venmo' | 'cashapp';
+
+export const PAYMENT_PLATFORM_IDS: PaymentPlatformId[] = ['venmo', 'cashapp'];
+
+export function isPaymentLink(url: string): boolean {
+  const p = detectPlatform(url);
+  return !!p && PAYMENT_PLATFORM_IDS.includes(p.id as PaymentPlatformId);
+}
+
+// "@pete-nguyen" / "pete-nguyen" → https://venmo.com/u/pete-nguyen
+// "$petenguyen" / "petenguyen"  → https://cash.app/$petenguyen
+export function paymentUrlFromHandle(
+  platform: PaymentPlatformId,
+  raw: string,
+): string | null {
+  const handle = raw.trim().replace(/^[@$]/, '');
+  if (!handle) return null;
+  if (platform === 'venmo') {
+    if (!/^[A-Za-z0-9_-]{1,30}$/.test(handle)) return null;
+    return `https://venmo.com/u/${handle}`;
+  }
+  if (!/^[A-Za-z][A-Za-z0-9_-]{0,19}$/.test(handle)) return null;
+  return `https://cash.app/$${handle}`;
+}
+
+// Inverse of paymentUrlFromHandle, for prefilling the inputs and for display.
+// Returns the handle with its conventional sigil ("@…" / "$…").
+export function paymentHandleFromUrl(url: string): string | null {
+  const p = detectPlatform(url);
+  if (!p) return null;
+  try {
+    const u = new URL(url.startsWith('http') ? url : `https://${url}`);
+    const last = u.pathname.split('/').filter(Boolean).pop() ?? '';
+    if (!last) return null;
+    if (p.id === 'venmo') return `@${last.replace(/^@/, '')}`;
+    if (p.id === 'cashapp') return `$${last.replace(/^\$/, '')}`;
+    return null;
+  } catch {
+    return null;
+  }
 }

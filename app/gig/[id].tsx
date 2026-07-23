@@ -1,5 +1,5 @@
 import { router, useLocalSearchParams } from 'expo-router';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { Avatar } from '@/components/avatar';
@@ -12,7 +12,7 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useAuth } from '@/lib/auth-context';
 import { useDevConversations } from '@/lib/dev-conversations';
 import { findOrCreateGigConversation } from '@/lib/messaging';
-import { usePosts, type GigCategory } from '@/lib/posts-store';
+import { usePosts, type GigCategory, type PostLookup } from '@/lib/posts-store';
 
 const CATEGORY_EMOJI: Record<GigCategory, string> = {
   Tutoring: '📚',
@@ -26,7 +26,7 @@ const CATEGORY_EMOJI: Record<GigCategory, string> = {
 export default function GigDetailScreen() {
   const c = Colors[useColorScheme() ?? 'light'];
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { gigs, hydrated } = usePosts();
+  const { gigs, hydrated, fetchPostById } = usePosts();
   const { session, isDev } = useAuth();
   const { startGigConversation } = useDevConversations();
   const realSession = !!session && !isDev;
@@ -34,13 +34,56 @@ export default function GigDetailScreen() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  // Until the store hydrates, a miss means "not loaded yet", not "deleted" —
-  // deep links land here before the first fetch resolves.
-  if (!gig && !hydrated) {
+  // Deep links / push taps can point at a gig older than the loaded feed
+  // pages — one direct lookup before we're allowed to claim "gone".
+  const lookupStartedRef = useRef(false);
+  const [lookup, setLookup] = useState<PostLookup | null>(null);
+  useEffect(() => {
+    if (!gig && hydrated && !lookupStartedRef.current) {
+      lookupStartedRef.current = true;
+      void fetchPostById('gig', id).then(setLookup);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gig, hydrated, lookup]);
+
+  // Until the store hydrates AND the by-id lookup answers, a miss means "not
+  // loaded yet", not "deleted" — deep links land here before the first fetch
+  // resolves.
+  if (!gig && (!hydrated || lookup === null)) {
     return (
       <ThemedView style={[styles.screen, { backgroundColor: c.background }]}>
         <View style={styles.emptyBlock}>
           <ActivityIndicator color={c.textMuted} />
+        </View>
+      </ThemedView>
+    );
+  }
+
+  if (!gig && lookup === 'error') {
+    return (
+      <ThemedView style={[styles.screen, { backgroundColor: c.background }]}>
+        <View style={styles.emptyBlock}>
+          <ThemedText style={[styles.emptyEyebrow, { color: c.textMuted }]} type="mono">
+            offline?
+          </ThemedText>
+          <ThemedText style={[styles.emptyHeading, { color: c.text }]}>
+            Couldn&apos;t load this gig
+          </ThemedText>
+          <ThemedText style={[styles.emptyBody, { color: c.textSecondary }]}>
+            Check your connection and try again.
+          </ThemedText>
+          <Pressable
+            onPress={() => {
+              lookupStartedRef.current = false;
+              setLookup(null);
+            }}
+            accessibilityRole="button"
+            style={({ pressed }) => [
+              styles.cta,
+              { backgroundColor: c.tint, opacity: pressed ? 0.85 : 1, marginTop: 16, alignSelf: 'stretch' },
+            ]}>
+            <ThemedText style={[styles.ctaText, { color: c.background }]}>Retry</ThemedText>
+          </Pressable>
         </View>
       </ThemedView>
     );
@@ -96,16 +139,25 @@ export default function GigDetailScreen() {
     setErr(null);
     setBusy(true);
     try {
-      const convId = await findOrCreateGigConversation({
+      const res = await findOrCreateGigConversation({
         meId: session.user.id,
         gigId: gig.id,
         posterId: gig.ownerId,
       });
-      if (!convId) {
-        setErr('Could not start a conversation.');
+      if (!res.ok) {
+        // Contract §3: 42501 = block (either direction) or an anonymous
+        // poster; P0002 = the gig is gone. Neither is transient — say so
+        // instead of implying a retry would work.
+        setErr(
+          res.code === 'blocked'
+            ? "You can't message this poster."
+            : res.code === 'not_found'
+              ? 'This gig no longer exists.'
+              : 'Could not start a conversation.',
+        );
         return;
       }
-      router.replace(`/chat/${convId}` as never);
+      router.replace(`/chat/${res.conversationId}` as never);
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : 'Failed to open conversation.');
     } finally {

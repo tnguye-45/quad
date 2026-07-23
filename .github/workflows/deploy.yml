@@ -17,7 +17,27 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Same checks as checks.yml — duplicated here (rather than workflow_call)
+  # so a broken build can never deploy even if the other workflow changes.
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install
+        run: npm ci
+      - name: Typecheck
+        run: npx tsc --noEmit
+      - name: Lint
+        run: npx eslint app lib components hooks constants scripts
+      - name: DB contract check
+        run: node scripts/check-contract.mjs
+
   build:
+    needs: checks
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

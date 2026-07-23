@@ -42,17 +42,25 @@ type ProfileEmbed = {
   avatar_url: string | null;
 } | null;
 
+// Conversation context now comes from the 0027 `*_feed` views, not embeds on
+// the base tables — table-wide SELECT on gigs/hangouts was revoked and the
+// identity columns (`poster_id`/`host_id`) were never re-granted, so the old
+// `gig:gigs(...)` embed fails the WHOLE request with 42501. View semantics:
+// the author id is NULL when the row is anonymous and not mine; my own rows
+// always carry my id. That null IS the masking signal.
 type GigEmbed = {
   title: string;
   payout_cents: number;
   anonymous: boolean;
-  poster_id: string;
+  /** null ⇢ anonymous poster who isn't me (masked by gigs_feed). */
+  poster_id: string | null;
 } | null;
 
 type HangoutEmbed = {
   title: string;
   anonymous: boolean;
-  host_id: string;
+  /** null ⇢ anonymous host who isn't me (masked by hangouts_feed). */
+  host_id: string | null;
 } | null;
 
 type PreviewMessage = {
@@ -186,13 +194,71 @@ function dollars(cents: number): string {
 
 // A conversation counterpart must never reveal an anonymous author's identity.
 // Gigs can no longer be DM'd anonymously (0034 refuses it server-side), but an
-// anonymous hangout still forms a group chat with its host — so mask the host
-// (and, defensively, any pre-existing anonymous gig poster) wherever we'd
-// otherwise render their real name/avatar.
-function isAnonymousAuthorMember(conv: ConversationRow, userId: string): boolean {
-  if (conv.gig?.anonymous && conv.gig.poster_id === userId) return true;
-  if (conv.hangout?.anonymous && conv.hangout.host_id === userId) return true;
+// anonymous hangout still forms a group chat with its host — so mask wherever
+// we'd otherwise render their real name/avatar. The `*_feed` views null the
+// author id for anonymous rows that aren't mine, so:
+//   author id === my id → I'm the anonymous author (safe to know)
+//   author id === null  → the anonymous author is some OTHER member — in a
+//     1:1 gig thread or a two-person hangout chat, that's the counterpart.
+function anonymousAuthorIsOther(conv: ConversationRow): boolean {
+  if (conv.gig?.anonymous && conv.gig.poster_id === null) return true;
+  if (conv.hangout?.anonymous && conv.hangout.host_id === null) return true;
   return false;
+}
+
+function isMyAnonymousConversation(conv: ConversationRow, myId: string): boolean {
+  if (conv.gig?.anonymous && conv.gig.poster_id === myId) return true;
+  if (conv.hangout?.anonymous && conv.hangout.host_id === myId) return true;
+  return false;
+}
+
+const GIG_CONTEXT_SELECT = 'id, title, payout_cents, anonymous, poster_id';
+const HANGOUT_CONTEXT_SELECT = 'id, title, anonymous, host_id';
+
+type GigContextRow = NonNullable<GigEmbed> & { id: string };
+type HangoutContextRow = NonNullable<HangoutEmbed> & { id: string };
+
+// Batch-fetch gig/hangout context through the feed views. Rows missing from
+// the result (deleted, or the author is blocked and the view filtered them)
+// simply fall out of the maps and callers render a generic label. Errors
+// THROW rather than degrade: without context we can't tell an anonymous
+// conversation from a named one, and rendering unmasked names on a guess is
+// exactly the leak the views exist to prevent.
+async function fetchConversationContexts(
+  gigIds: string[],
+  hangoutIds: string[],
+): Promise<{
+  gigs: Map<string, NonNullable<GigEmbed>>;
+  hangouts: Map<string, NonNullable<HangoutEmbed>>;
+}> {
+  const [gigRes, hangoutRes] = await Promise.all([
+    gigIds.length > 0
+      ? supabase.from('gigs_feed').select(GIG_CONTEXT_SELECT).in('id', gigIds)
+      : Promise.resolve({ data: [], error: null }),
+    hangoutIds.length > 0
+      ? supabase.from('hangouts_feed').select(HANGOUT_CONTEXT_SELECT).in('id', hangoutIds)
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+  if (gigRes.error) throw gigRes.error;
+  if (hangoutRes.error) throw hangoutRes.error;
+  const gigs = new Map<string, NonNullable<GigEmbed>>();
+  for (const g of (gigRes.data ?? []) as unknown as GigContextRow[]) {
+    gigs.set(g.id, {
+      title: g.title,
+      payout_cents: g.payout_cents,
+      anonymous: g.anonymous,
+      poster_id: g.poster_id,
+    });
+  }
+  const hangouts = new Map<string, NonNullable<HangoutEmbed>>();
+  for (const h of (hangoutRes.data ?? []) as unknown as HangoutContextRow[]) {
+    hangouts.set(h.id, {
+      title: h.title,
+      anonymous: h.anonymous,
+      host_id: h.host_id,
+    });
+  }
+  return { gigs, hangouts };
 }
 
 const MASKED_PARTNER = {
@@ -262,15 +328,14 @@ export function useConversations(): {
       }
 
       const [convRes, partnerRes] = await Promise.all([
-        // Conversation context + latest message per conversation. The ordered
-        // limit-1 embed replaces the old "download every message in every
-        // thread and dedupe in JS" preview query.
+        // Latest message per conversation via the ordered limit-1 embed (it
+        // replaces the old "download every message in every thread and dedupe
+        // in JS" preview query). Gig/hangout context is fetched separately
+        // through the *_feed views — embedding the base tables selects the
+        // revoked identity columns and 42501s the whole request.
         supabase
           .from('conversations')
-          .select(
-            'id, gig_id, hangout_id, gig:gigs(title, payout_cents, anonymous, poster_id), ' +
-              'hangout:hangouts(title, anonymous, host_id), messages(id, sender_id, body, sent_at, image_url)',
-          )
+          .select('id, gig_id, hangout_id, messages(id, sender_id, body, sent_at, image_url)')
           .in('id', convIds)
           .order('sent_at', { referencedTable: 'messages', ascending: false })
           .limit(1, { referencedTable: 'messages' }),
@@ -286,9 +351,21 @@ export function useConversations(): {
       if (convRes.error) throw convRes.error;
       if (partnerRes.error) throw partnerRes.error;
 
+      const rawConvs = (convRes.data ?? []) as unknown as Omit<
+        ConversationRow,
+        'gig' | 'hangout'
+      >[];
+      const ctx = await fetchConversationContexts(
+        [...new Set(rawConvs.map((c) => c.gig_id).filter((id): id is string => !!id))],
+        [...new Set(rawConvs.map((c) => c.hangout_id).filter((id): id is string => !!id))],
+      );
       const convById = new Map<string, ConversationRow>();
-      for (const conv of (convRes.data ?? []) as unknown as ConversationRow[]) {
-        convById.set(conv.id, conv);
+      for (const conv of rawConvs) {
+        convById.set(conv.id, {
+          ...conv,
+          gig: conv.gig_id ? (ctx.gigs.get(conv.gig_id) ?? null) : null,
+          hangout: conv.hangout_id ? (ctx.hangouts.get(conv.hangout_id) ?? null) : null,
+        });
       }
       const partnersByConv = new Map<string, MemberRow[]>();
       for (const p of (partnerRes.data ?? []) as unknown as MemberRow[]) {
@@ -311,7 +388,9 @@ export function useConversations(): {
           partnerName = `Group · ${partners.length + 1} people`;
           partnerInitials = '··';
           partnerAvatarUrl = null;
-        } else if (partner && isAnonymousAuthorMember(conv, partner.user_id)) {
+        } else if (partner && anonymousAuthorIsOther(conv)) {
+          // One counterpart + an anonymous author who isn't me ⇒ the
+          // counterpart is the anonymous author.
           partnerName = MASKED_PARTNER.name;
           partnerInitials = MASKED_PARTNER.initials;
           partnerAvatarUrl = MASKED_PARTNER.avatarUrl;
@@ -513,13 +592,11 @@ export function useThread(conversationId: string | undefined): {
     (async () => {
       try {
         const [convRes, msgsRes, partnerRes] = await Promise.all([
+          // Context comes from the *_feed views below — embedding gigs/
+          // hangouts here selects revoked identity columns (42501).
           supabase
             .from('conversations')
-            .select(`
-              id, gig_id, hangout_id,
-              gig:gigs(title, payout_cents, anonymous, poster_id),
-              hangout:hangouts(title, anonymous, host_id)
-            `)
+            .select('id, gig_id, hangout_id')
             .eq('id', conversationId)
             .maybeSingle(),
           // Latest page only — full history stays on the server.
@@ -541,16 +618,35 @@ export function useThread(conversationId: string | undefined): {
         if (convRes.error) throw convRes.error;
         if (msgsRes.error) throw msgsRes.error;
         if (partnerRes.error) throw partnerRes.error;
-        setConversation((convRes.data ?? null) as unknown as ConversationRow | null);
+        const rawConv = (convRes.data ?? null) as unknown as Omit<
+          ConversationRow,
+          'gig' | 'hangout'
+        > | null;
+        let convRow: ConversationRow | null = null;
+        if (rawConv) {
+          const ctx = await fetchConversationContexts(
+            rawConv.gig_id ? [rawConv.gig_id] : [],
+            rawConv.hangout_id ? [rawConv.hangout_id] : [],
+          );
+          convRow = {
+            ...rawConv,
+            gig: rawConv.gig_id ? (ctx.gigs.get(rawConv.gig_id) ?? null) : null,
+            hangout: rawConv.hangout_id ? (ctx.hangouts.get(rawConv.hangout_id) ?? null) : null,
+          };
+        }
+        if (!mounted) return;
+        setConversation(convRow);
         setMessages(
           ((msgsRes.data ?? []) as unknown as MessageRow[]).map(messageFromRow).reverse(),
         );
-        const convRow = (convRes.data ?? null) as unknown as ConversationRow | null;
         const partner = (partnerRes.data ?? [])[0] as unknown as
           | { user_id: string; user: ProfileEmbed }
           | undefined;
-        const partnerIsAnon =
-          !!partner && !!convRow && isAnonymousAuthorMember(convRow, partner.user_id);
+        // With view-masked context we can no longer point at WHICH member is
+        // the anonymous author — mask the counterpart whenever the author is
+        // anonymous-and-not-me. In a 1:1 that's exact; in a group it's
+        // conservative (better to over-mask than leak).
+        const partnerIsAnon = !!partner && !!convRow && anonymousAuthorIsOther(convRow);
         if (partnerIsAnon) {
           // Anonymous hangout host: never surface their real identity in the
           // chat header.
@@ -567,7 +663,7 @@ export function useThread(conversationId: string | undefined): {
         // host), broadcast no name, or the typing indicator would leak it as
         // "<real name> is typing…". A null name renders as "Someone".
         const meIsAnon =
-          !!convRow && isAnonymousAuthorMember(convRow, session!.user.id);
+          !!convRow && isMyAnonymousConversation(convRow, session!.user.id);
         if (meIsAnon) {
           myDisplayNameRef.current = null;
         } else {
@@ -782,7 +878,17 @@ export function useThread(conversationId: string | undefined): {
       .single();
     if (sendErr) {
       console.warn('[messaging] send failed:', sendErr.message);
-      setError(sendErr.message);
+      // Contract §3: 42501 on a messages insert means a block (either
+      // direction) closed this 1:1 thread. 54000 is the 0036 rate limit.
+      // Anything else keeps generic copy — raw RLS text reads like a bug.
+      const code = (sendErr as { code?: string }).code;
+      setError(
+        code === '42501'
+          ? 'You can no longer message this person.'
+          : code === '54000'
+            ? "You're sending messages too quickly — try again in a bit."
+            : "Couldn't send. Check your connection and try again.",
+      );
       return false;
     }
     if (inserted) {
@@ -890,36 +996,65 @@ export function useThread(conversationId: string | undefined): {
   );
 }
 
+export type StartConversationResult =
+  | { ok: true; conversationId: string }
+  | { ok: false; code: 'blocked' | 'not_found' | 'error' };
+
 // Start (or reuse) a 1:1 conversation with the gig's poster. Backed by the
 // `start_gig_conversation` SECURITY DEFINER RPC, which is the only way to
-// insert a membership row for someone other than yourself.
+// insert a membership row for someone other than yourself. Contract §3:
+// 42501 = block (either direction) or an anonymous poster (0034); P0002 =
+// gig no longer exists.
 export async function findOrCreateGigConversation(args: {
   meId: string;
   gigId: string;
   posterId: string;
-}): Promise<string | null> {
-  if (args.meId === args.posterId) return null;
+}): Promise<StartConversationResult> {
+  if (args.meId === args.posterId) return { ok: false, code: 'error' };
   const { data, error } = await supabase.rpc('start_gig_conversation', {
     p_gig_id: args.gigId,
   });
   if (error) {
     console.warn('[messaging] start_gig_conversation failed:', error.message);
-    return null;
+    const code = (error as { code?: string }).code;
+    return {
+      ok: false,
+      code: code === '42501' ? 'blocked' : code === 'P0002' ? 'not_found' : 'error',
+    };
   }
-  return (data as string) ?? null;
+  const conversationId = (data as string) ?? null;
+  return conversationId
+    ? { ok: true, conversationId }
+    : { ok: false, code: 'error' };
 }
 
+export type JoinHangoutResult =
+  | { ok: true; conversationId: string | null }
+  | { ok: false; code: 'full' | 'blocked' | 'not_found' | 'error' };
+
 // RSVP to a hangout and join its group conversation in one atomic call.
-// Returns the conversation id on success, or null on error.
-export async function joinHangout(hangoutId: string): Promise<string | null> {
+// Contract §3: 23514 = capacity trigger says the hangout is full; 42501 =
+// block vs the host; P0002 = hangout no longer exists.
+export async function joinHangout(hangoutId: string): Promise<JoinHangoutResult> {
   const { data, error } = await supabase.rpc('join_hangout', {
     p_hangout_id: hangoutId,
   });
   if (error) {
     console.warn('[messaging] join_hangout failed:', error.message);
-    return null;
+    const code = (error as { code?: string }).code;
+    return {
+      ok: false,
+      code:
+        code === '23514'
+          ? 'full'
+          : code === '42501'
+            ? 'blocked'
+            : code === 'P0002'
+              ? 'not_found'
+              : 'error',
+    };
   }
-  return (data as string) ?? null;
+  return { ok: true, conversationId: (data as string) ?? null };
 }
 
 export async function leaveHangout(hangoutId: string): Promise<boolean> {

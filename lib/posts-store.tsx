@@ -180,12 +180,18 @@ type Store = {
   /** Cursor-based pagination on posted_at / created_at. Idempotent: a no-op
    *  while a load is already in flight for that kind. */
   loadMore: (kind: 'gigs' | 'hangouts' | 'voices') => Promise<void>;
-  /** Resolves true when the post reached the server (or dev store). Callers
+  /** Resolves `true` when the post reached the server (or dev store) —
+   *  compare with `=== true`, the failure values are truthy strings. Callers
    *  use this to decide whether to close the compose screen. */
-  addGig: (input: AddGigInput) => Promise<boolean>;
-  addHangout: (input: AddHangoutInput) => Promise<boolean>;
-  addVoice: (input: AddVoiceInput) => Promise<boolean>;
-  rsvpHangout: (id: string) => Promise<void>;
+  addGig: (input: AddGigInput) => Promise<AddResult>;
+  addHangout: (input: AddHangoutInput) => Promise<AddResult>;
+  addVoice: (input: AddVoiceInput) => Promise<AddResult>;
+  /** One-shot fetch of a single post through its feed view, merged into the
+   *  store. Detail screens use this when a deep link / push tap points at a
+   *  post older than the pages loaded so far — without it, anything past the
+   *  first page renders a false "404 · gone". */
+  fetchPostById: (kind: 'gig' | 'hangout' | 'voice', id: string) => Promise<PostLookup>;
+  rsvpHangout: (id: string) => Promise<RsvpResult>;
   /** Hangout ids the current user has already joined (including hangouts they
    *  host). rsvpHangout no-ops for these so a quick double-tap can't inflate
    *  the going count. */
@@ -197,6 +203,24 @@ type Store = {
    *  clears the vote. Optimistic, single atomic RPC, rolls back on failure. */
   voteVoice: (id: string, arrow: 1 | -1) => Promise<void>;
 };
+
+/** Result of fetchPostById: 'missing' means the server says it's gone (or
+ *  masked/blocked out of the view); 'error' means we couldn't ask — screens
+ *  should offer retry, not claim the post was deleted. */
+export type PostLookup = 'found' | 'missing' | 'error';
+
+/** Failure detail for the composers: 'rate_limited' is the 0036 per-author
+ *  insert cap (errcode 54000) and deserves its own copy — "check your
+ *  connection" would be a lie. */
+export type AddResult = true | 'rate_limited' | 'error';
+
+/** Result of rsvpHangout. Mutation outcomes are returned to the caller (and
+ *  surfaced next to the button that was tapped) instead of being funneled
+ *  into the store-wide `error`, which the feed tabs render as a misleading
+ *  "Couldn't load" banner. */
+export type RsvpResult =
+  | { status: 'ok' | 'already'; conversationId: string | null }
+  | { status: 'full' | 'blocked' | 'not_found' | 'error'; conversationId: null };
 
 /** How many rows to fetch per page on initial load + each loadMore call. */
 const PAGE_SIZE = 20;
@@ -725,15 +749,82 @@ export function PostsProvider({ children }: { children: ReactNode }) {
           void handleEvent(payload.new as FeedEvent);
         },
       )
-      .subscribe();
+      .subscribe((status) => {
+        // Fires on every (re)join, not just the first — same pattern as the
+        // messaging hooks. Feed events that fired while the socket was down
+        // (backgrounded phone, laptop lid closed) would otherwise leave the
+        // feed frozen on a stale snapshot until a manual pull-to-refresh.
+        // fetchAll's generation counter makes the extra mount-time call safe.
+        if (status === 'SUBSCRIBED') void fetchAll();
+      });
     return () => {
       supabase.removeChannel(channel);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [realSession]);
+
+  // One-shot lookup for deep links / push taps pointing past the loaded
+  // pages. Merges the row into the store (replace if present, else append —
+  // appending keeps keyset pagination untouched since cursors come from raw
+  // fetched pages, not state). 'missing' is only returned when the server
+  // answered and the view has no such row (deleted, or the author is blocked).
+  async function fetchPostByIdImpl(
+    kind: 'gig' | 'hangout' | 'voice',
+    id: string,
+  ): Promise<PostLookup> {
+    if (!realSession) return 'missing'; // dev/seed data is fully in memory
+    function merge<T extends { id: string }>(
+      setter: (fn: (cur: T[]) => T[]) => void,
+      fresh: T,
+    ) {
+      setter((cur) =>
+        cur.some((x) => x.id === id)
+          ? cur.map((x) => (x.id === id ? fresh : x))
+          : [...cur, fresh],
+      );
+    }
+    try {
+      if (kind === 'gig') {
+        const { data, error: e } = await supabase
+          .from('gigs_feed')
+          .select(GIG_FEED_SELECT)
+          .eq('id', id)
+          .maybeSingle();
+        if (e) return 'error';
+        if (!data) return 'missing';
+        merge(setGigs, gigFromFeed(data as unknown as DbGigFeedRow));
+        return 'found';
+      }
+      if (kind === 'hangout') {
+        const { data, error: e } = await supabase
+          .from('hangouts_feed')
+          .select(HANGOUT_FEED_SELECT)
+          .eq('id', id)
+          .maybeSingle();
+        if (e) return 'error';
+        if (!data) return 'missing';
+        // No hangoutIsLive gate: someone following a link to an expired
+        // hangout should see what it was, not a false "deleted".
+        merge(setHangouts, hangoutFromFeed(data as unknown as DbHangoutFeedRow));
+        return 'found';
+      }
+      const { data, error: e } = await supabase
+        .from('voices_feed')
+        .select(VOICE_FEED_SELECT)
+        .eq('id', id)
+        .maybeSingle();
+      if (e) return 'error';
+      if (!data) return 'missing';
+      merge(setVoices, voiceFromFeed(data as unknown as DbVoiceFeedRow));
+      return 'found';
+    } catch {
+      return 'error';
+    }
+  }
 
   // ─────────────────────── mutations ───────────────────────
 
-  async function addGigImpl(input: AddGigInput): Promise<boolean> {
+  async function addGigImpl(input: AddGigInput): Promise<AddResult> {
     if (!realSession) {
       const now = Date.now();
       const optimistic: Gig = {
@@ -770,8 +861,7 @@ export function PostsProvider({ children }: { children: ReactNode }) {
       .single();
     if (insertErr) {
       console.warn('[posts-store] addGig failed:', insertErr.message);
-      setError(insertErr.message);
-      return false;
+      return insertErr.code === '54000' ? 'rate_limited' : 'error';
     }
     if (data) {
       // The base table can't return identity columns — it's our own post, so
@@ -788,7 +878,7 @@ export function PostsProvider({ children }: { children: ReactNode }) {
     return true;
   }
 
-  async function addHangoutImpl(input: AddHangoutInput): Promise<boolean> {
+  async function addHangoutImpl(input: AddHangoutInput): Promise<AddResult> {
     if (!realSession) {
       const now = Date.now();
       const optimistic: Hangout = {
@@ -828,8 +918,7 @@ export function PostsProvider({ children }: { children: ReactNode }) {
       .single();
     if (insertErr) {
       console.warn('[posts-store] addHangout failed:', insertErr.message);
-      setError(insertErr.message);
-      return false;
+      return insertErr.code === '54000' ? 'rate_limited' : 'error';
     }
     // Host is implicitly RSVP'd — insert into attendees so going count = 1.
     if (data) {
@@ -852,7 +941,7 @@ export function PostsProvider({ children }: { children: ReactNode }) {
     return true;
   }
 
-  async function addVoiceImpl(input: AddVoiceInput): Promise<boolean> {
+  async function addVoiceImpl(input: AddVoiceInput): Promise<AddResult> {
     if (!realSession) {
       const now = Date.now();
       const optimistic: Voice = {
@@ -884,8 +973,7 @@ export function PostsProvider({ children }: { children: ReactNode }) {
       .single();
     if (insertErr) {
       console.warn('[posts-store] addVoice failed:', insertErr.message);
-      setError(insertErr.message);
-      return false;
+      return insertErr.code === '54000' ? 'rate_limited' : 'error';
     }
     if (data) {
       const fresh = voiceFromFeed({
@@ -900,42 +988,48 @@ export function PostsProvider({ children }: { children: ReactNode }) {
     return true;
   }
 
-  async function rsvpHangoutImpl(id: string) {
+  async function rsvpHangoutImpl(id: string): Promise<RsvpResult> {
     // The RPC is idempotent server-side (ON CONFLICT DO NOTHING), so a repeat
     // tap never inserts a row — but the optimistic +1 used to fire every time.
     // Only count the join when we know it's the first one.
-    if (myRsvps[id]) return;
-    if (rsvpInFlightRef.current.has(id)) return;
+    if (myRsvps[id]) return { status: 'already', conversationId: null };
+    if (rsvpInFlightRef.current.has(id)) return { status: 'already', conversationId: null };
     if (!realSession) {
       setMyRsvps((cur) => ({ ...cur, [id]: true }));
       setHangouts((cur) =>
         cur.map((h) => (h.id === id ? { ...h, going: h.going + 1 } : h)),
       );
-      return;
+      return { status: 'ok', conversationId: null };
     }
     rsvpInFlightRef.current.add(id);
     try {
       // join_hangout RPC handles attendee insert + group conversation
-      // membership atomically.
-      const { error: rsvpErr } = await supabase.rpc('join_hangout', {
+      // membership atomically, and returns the group conversation id.
+      const { data, error: rsvpErr } = await supabase.rpc('join_hangout', {
         p_hangout_id: id,
       });
       if (rsvpErr) {
         console.warn('[posts-store] rsvp failed:', rsvpErr.message);
-        // Contract error codes: 23514 = capacity, 42501 = blocked vs host.
-        setError(
-          rsvpErr.code === '23514'
-            ? 'This hangout is full.'
-            : rsvpErr.code === '42501'
-              ? "You can't join this hangout."
-              : rsvpErr.message,
-        );
-        return;
+        // Contract §3: 23514 = capacity, 42501 = blocked vs host, P0002 =
+        // hangout gone. Returned to the caller — NOT setError, which the feed
+        // tabs would render as a false "Couldn't load hangouts" banner.
+        return {
+          status:
+            rsvpErr.code === '23514'
+              ? 'full'
+              : rsvpErr.code === '42501'
+                ? 'blocked'
+                : rsvpErr.code === 'P0002'
+                  ? 'not_found'
+                  : 'error',
+          conversationId: null,
+        };
       }
       setMyRsvps((cur) => ({ ...cur, [id]: true }));
       setHangouts((cur) =>
         cur.map((h) => (h.id === id ? { ...h, going: h.going + 1 } : h)),
       );
+      return { status: 'ok', conversationId: (data as string) ?? null };
     } finally {
       rsvpInFlightRef.current.delete(id);
     }
@@ -983,8 +1077,10 @@ export function PostsProvider({ children }: { children: ReactNode }) {
           // Reconcile from server truth rather than replaying an inverse delta
           // — after several taps the delta no longer describes the divergence.
           voteTargetRef.current.delete(id);
+          // Server truth visibly snaps the arrow/score back — that IS the
+          // failure feedback. Setting the store-wide error here made all
+          // three feed tabs show a false "Couldn't load" banner.
           await reconcileVoteFromServer(id);
-          setError(voteErr.message);
           break;
         }
       }
@@ -1028,6 +1124,7 @@ export function PostsProvider({ children }: { children: ReactNode }) {
       addGig: addGigImpl,
       addHangout: addHangoutImpl,
       addVoice: addVoiceImpl,
+      fetchPostById: fetchPostByIdImpl,
       rsvpHangout: rsvpHangoutImpl,
       myRsvps,
       myVotes,

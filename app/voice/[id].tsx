@@ -1,4 +1,5 @@
 import { router, useLocalSearchParams } from 'expo-router';
+import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { CommentThread } from '@/components/comment-thread';
@@ -7,22 +8,66 @@ import { ThemedView } from '@/components/themed-view';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import { usePosts, VOICE_TOPIC_EMOJI } from '@/lib/posts-store';
+import { usePosts, VOICE_TOPIC_EMOJI, type PostLookup } from '@/lib/posts-store';
 
 export default function VoiceDetailScreen() {
   const c = Colors[useColorScheme() ?? 'light'];
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { voices, voteVoice, myVotes, hydrated } = usePosts();
+  const { voices, voteVoice, myVotes, hydrated, fetchPostById } = usePosts();
   const voice = voices.find((v) => v.id === id);
   const vote: 0 | 1 | -1 = (id && myVotes[id]) || 0;
 
-  // Until the store hydrates, a miss means "not loaded yet", not "deleted" —
-  // deep links land here before the first fetch resolves.
-  if (!voice && !hydrated) {
+  // Deep links / push taps can point at a voice older than the loaded feed
+  // pages — one direct lookup before we're allowed to claim "gone".
+  const lookupStartedRef = useRef(false);
+  const [lookup, setLookup] = useState<PostLookup | null>(null);
+  useEffect(() => {
+    if (!voice && hydrated && !lookupStartedRef.current) {
+      lookupStartedRef.current = true;
+      void fetchPostById('voice', id).then(setLookup);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [voice, hydrated, lookup]);
+
+  // Until the store hydrates AND the by-id lookup answers, a miss means "not
+  // loaded yet", not "deleted".
+  if (!voice && (!hydrated || lookup === null)) {
     return (
       <ThemedView style={[styles.screen, { backgroundColor: c.background }]}>
         <View style={styles.emptyBlock}>
           <ActivityIndicator color={c.textMuted} />
+        </View>
+      </ThemedView>
+    );
+  }
+
+  if (!voice && lookup === 'error') {
+    return (
+      <ThemedView style={[styles.screen, { backgroundColor: c.background }]}>
+        <View style={styles.emptyBlock}>
+          <ThemedText style={[styles.emptyEyebrow, { color: c.textMuted }]} type="mono">
+            offline?
+          </ThemedText>
+          <ThemedText style={[styles.emptyHeading, { color: c.text }]}>
+            Couldn&apos;t load this voice
+          </ThemedText>
+          <ThemedText style={[styles.emptyBody, { color: c.textSecondary }]}>
+            Check your connection and try again.
+          </ThemedText>
+          <Pressable
+            onPress={() => {
+              lookupStartedRef.current = false;
+              setLookup(null);
+            }}
+            accessibilityRole="button"
+            style={({ pressed }) => [
+              styles.closeBtn,
+              { borderColor: c.border, opacity: pressed ? 0.5 : 1 },
+            ]}>
+            <ThemedText style={[styles.closeText, { color: c.text }]} type="mono">
+              retry
+            </ThemedText>
+          </Pressable>
         </View>
       </ThemedView>
     );

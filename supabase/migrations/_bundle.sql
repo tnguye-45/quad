@@ -1,7 +1,7 @@
 -- ═══════════════════════════════════════════════════════════════════════════
 -- quad — GENERATED migration bundle. DO NOT EDIT BY HAND.
 -- Regenerate with: node supabase/scripts/generate-bundle.mjs
--- Contains, in order: 0001, 0002, 0003, 0004, 0005, 0006, 0007, 0008, 0009, 0010, 0011, 0012, 0013, 0014, 0015, 0016, 0017, 0018, 0019, 0020, 0021, 0022, 0023, 0024, 0025, 0026, 0027, 0028, 0029, 0030, 0031, 0032, 0033, 0034
+-- Contains, in order: 0001, 0002, 0003, 0004, 0005, 0006, 0007, 0008, 0009, 0010, 0011, 0012, 0013, 0014, 0015, 0016, 0017, 0018, 0019, 0020, 0021, 0022, 0023, 0024, 0025, 0026, 0027, 0028, 0029, 0030, 0031, 0032, 0033, 0034, 0035, 0036, 0037
 -- ═══════════════════════════════════════════════════════════════════════════
 
 -- ═══════════════ 0001_schema.sql ═══════════════
@@ -2888,3 +2888,160 @@ alter table public.profiles
 alter table public.profiles
   add constraint profiles_links_count
   check (jsonb_array_length(links) <= 10) not valid;
+
+-- ═══════════════ 0035_reports_read_lockdown.sql ═══════════════
+
+-- quad — reports: close the de-anonymization oracle (read-own leaked the
+-- server-resolved author id)
+--
+-- 0030/0033's resolver trigger runs SECURITY DEFINER and stamps the REAL
+-- author id into reports.target_user_id — including for anonymous voices,
+-- gigs, hangouts, and comments. 0014's "reports: read own" SELECT policy then
+-- let the reporter read their own row back. Net effect: report any anonymous
+-- post → select your own report → target_user_id is the anonymous author's
+-- uid → the public profiles directory turns that into a name. At the 20/hr
+-- report rate limit that's ~480 de-anonymizations per day per account, which
+-- defeats the entire 0027 masking architecture.
+--
+-- The client never SELECTs reports: app/report.tsx only inserts (with the
+-- default return=minimal), and "already reported" rides the 23505 unique
+-- violation from 0030's dedupe index, not a read-back. The moderator queue
+-- uses the service role, which none of this touches. So the client read path
+-- can simply cease to exist — fail closed.
+
+drop policy if exists "reports: read own" on public.reports;
+
+-- Belt and suspenders: even if a future migration adds a SELECT policy, the
+-- table-level grant is gone until someone deliberately re-grants columns
+-- (and they should exclude target_user_id when they do).
+revoke select on public.reports from authenticated, anon;
+
+-- ═══════════════ 0036_content_rate_limits.sql ═══════════════
+
+-- quad — per-author insert rate limits on content tables
+--
+-- Until now the only rate limit anywhere was reports (0030, 20/hr). Every
+-- gig/hangout insert fires notify_new_post → a push to EVERY registered
+-- device, with the (attacker-controlled) title as the body. With the anon key
+-- public by design, one hostile student with a script could blast the whole
+-- campus and flood every feed — a week-one trust killer at a school this
+-- small. 0032/0033 capped row SIZE; nothing capped row COUNT.
+--
+-- One BEFORE INSERT trigger, shared across the five content tables, counting
+-- the caller's own rows in the last hour. SECURITY DEFINER because the
+-- authenticated role can no longer SELECT the author columns on these tables
+-- (0027 column lockdown), so an invoker-rights count would itself be denied.
+-- Errcode 54000 to match the reports limiter — clients already map it.
+--
+-- Limits (per author, per rolling hour) — generous multiples of any honest
+-- usage at launch scale:
+--   gigs 5 · hangouts 5 · voices 10 · comments 60 · messages 120
+
+create or replace function public.enforce_content_rate_limit()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_limit int := tg_argv[0]::int;
+  v_count int;
+begin
+  if auth.uid() is null then
+    -- Definer functions and service-role writes (seeds, moderation) are not
+    -- subject to the limit.
+    return new;
+  end if;
+
+  if tg_table_name = 'gigs' then
+    select count(*) into v_count from public.gigs
+      where poster_id = auth.uid() and posted_at > now() - interval '1 hour';
+  elsif tg_table_name = 'hangouts' then
+    select count(*) into v_count from public.hangouts
+      where host_id = auth.uid() and created_at > now() - interval '1 hour';
+  elsif tg_table_name = 'voices' then
+    select count(*) into v_count from public.voices
+      where author_id = auth.uid() and posted_at > now() - interval '1 hour';
+  elsif tg_table_name = 'comments' then
+    select count(*) into v_count from public.comments
+      where author_id = auth.uid() and created_at > now() - interval '1 hour';
+  elsif tg_table_name = 'messages' then
+    select count(*) into v_count from public.messages
+      where sender_id = auth.uid() and sent_at > now() - interval '1 hour';
+  else
+    return new;
+  end if;
+
+  if v_count >= v_limit then
+    raise exception 'rate limit: too many % in the last hour', tg_table_name
+      using errcode = '54000';
+  end if;
+
+  return new;
+end;
+$$;
+
+revoke all on function public.enforce_content_rate_limit() from public;
+
+drop trigger if exists rate_limit_gigs on public.gigs;
+create trigger rate_limit_gigs
+  before insert on public.gigs
+  for each row execute function public.enforce_content_rate_limit('5');
+
+drop trigger if exists rate_limit_hangouts on public.hangouts;
+create trigger rate_limit_hangouts
+  before insert on public.hangouts
+  for each row execute function public.enforce_content_rate_limit('5');
+
+drop trigger if exists rate_limit_voices on public.voices;
+create trigger rate_limit_voices
+  before insert on public.voices
+  for each row execute function public.enforce_content_rate_limit('10');
+
+drop trigger if exists rate_limit_comments on public.comments;
+create trigger rate_limit_comments
+  before insert on public.comments
+  for each row execute function public.enforce_content_rate_limit('60');
+
+drop trigger if exists rate_limit_messages on public.messages;
+create trigger rate_limit_messages
+  before insert on public.messages
+  for each row execute function public.enforce_content_rate_limit('120');
+
+-- ═══════════════ 0037_message_images_anon_path.sql ═══════════════
+
+-- quad — message-images: stop leaking the uploader's uid in the object path
+--
+-- 0017's path convention was `{userId}/{stamp}-{rand}.jpg`, and the public
+-- URL is stored verbatim in messages.image_url — readable by every member of
+-- the conversation. For an ANONYMOUS hangout host that meant any group member
+-- could read the host's real uid out of an image URL and resolve it against
+-- the public profiles directory: a de-anonymization path the 0027/0034 work
+-- didn't cover.
+--
+-- New convention (client change ships with this migration):
+--   `{conversationId}/{stamp}-{rand}.jpg`
+-- The conversation id is shared knowledge among members and identifies no
+-- one. Upload rights change from "own folder" to "a conversation I belong
+-- to", via the same is_conversation_member() helper the messages RLS uses.
+--
+-- Kept as-is, deliberately:
+--   * public read (URLs are unguessable; a private bucket + signed URLs is a
+--     larger change tracked for later),
+--   * the owner-folder UPDATE/DELETE policies — they still govern legacy
+--     `{uid}/...` objects and simply never match the new paths (messages are
+--     immutable in v1; deletion happens via the delete-account function's
+--     service role, which RLS doesn't bind).
+--   * delete-account must now ALSO remove objects referenced by the user's
+--     messages.image_url, not just the `{uid}/` prefix — shipped in the same
+--     commit (supabase/functions/delete-account).
+
+drop policy if exists "message-images: owner insert" on storage.objects;
+create policy "message-images: member insert"
+  on storage.objects for insert
+  to authenticated
+  with check (
+    bucket_id = 'message-images'
+    -- Non-uuid first segments fail the cast loudly (fail closed).
+    and public.is_conversation_member(((storage.foldername(name))[1])::uuid)
+  );

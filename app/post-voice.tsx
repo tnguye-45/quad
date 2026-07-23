@@ -58,8 +58,12 @@ export default function PostVoiceScreen() {
         posterInitials: profile?.initials ?? null,
         posterAvatarUrl: profile?.avatar_url ?? null,
       });
-      if (!ok) {
-        setErr("Couldn't post your voice. Check your connection and try again.");
+      if (ok !== true) {
+        setErr(
+          ok === 'rate_limited'
+            ? "You're posting a lot right now — try again in a bit."
+            : "Couldn't post your voice. Check your connection and try again.",
+        );
         return;
       }
       router.back();

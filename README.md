@@ -53,9 +53,9 @@ On the welcome screen, tap **"Dev: enter as admin (skip auth)"** to bypass Supab
 See [supabase/README.md](supabase/README.md) for the full one-time setup (~10 minutes). Short version:
 
 1. Create a project at [supabase.com](https://supabase.com)
-2. Run migrations `0001` → `0006` in order via the SQL Editor
+2. Run the migrations in `supabase/migrations/` in order via the SQL Editor — or paste the generated `_bundle.sql` for a fresh project
 3. Configure **Authentication → Allowed email domains** to include `nd.edu`
-4. **Enable Realtime** on `gigs`, `hangouts`, `voices`, and `messages` (Project Settings → Replication → toggle these tables on the `supabase_realtime` publication)
+4. Do **NOT** hand-edit the Realtime publication. The migrations manage it: content tables (`gigs`, `hangouts`, `voices`, `comments`) were deliberately **removed** from `supabase_realtime` (their full-row payloads leaked anonymous author ids — see migration 0028); the client subscribes to the `feed_events` signal table plus `messages`/`conversation_members`, which the migrations publish. Re-adding the content tables reopens the leak.
 5. Copy your project URL + anon key into `.env`
 
 ## Roadmap
@@ -70,7 +70,7 @@ See [supabase/README.md](supabase/README.md) for the full one-time setup (~10 mi
 app/
   (auth)/           sign-in, sign-up, forgot-password, check-email
   (tabs)/           gigs (index), map, voices, explore (hangouts), messages
-  chat/[id].tsx     thread view (currently mocked)
+  chat/[id].tsx     thread view (real backend; dev mode uses the in-memory store)
   gig/[id].tsx      gig detail + message poster
   post-gig.tsx      modal — also exports the shared PostAsToggle
   post-voice.tsx    modal — voices are anonymous by default
@@ -80,14 +80,15 @@ app/
   splash.tsx, welcome.tsx
 components/
   logo.tsx          Logo, NamePlaque (logo + "quad" wordmark)
-  campus-map.tsx, themed-text.tsx, themed-view.tsx, ui/icon-symbol.tsx
+  themed-text.tsx, themed-view.tsx, ui/icon-symbol.tsx, …
 lib/
   supabase.ts       Supabase client (SSR-safe storage adapter)
   auth-context.tsx  session, profile, sign-in/up, dev shortcut
   posts-store.tsx   gigs/hangouts/voices via Supabase + realtime; falls back to seeds in dev mode
   messaging.ts      conversations + threads via Supabase; useConversations / useThread hooks; findOrCreateGigConversation helper
 supabase/
-  migrations/       0001 schema, 0002 RLS, 0003 triggers, 0004 profile.links, 0005 voices, 0006 app alignment
+  migrations/       0001–0037 (schema, RLS, realtime, security hardening); _bundle.sql is generated — never hand-edit
+  CLIENT_CONTRACT.md what the client may read/subscribe to after the security pass — read before touching queries
   README.md         one-time Supabase project setup
 ```
 

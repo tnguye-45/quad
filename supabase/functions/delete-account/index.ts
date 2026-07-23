@@ -154,6 +154,57 @@ async function deleteBucketObjects(bucket: string, userId: string): Promise<bool
   }
 }
 
+// 0037 moved message-image paths from `{uid}/...` to `{conversationId}/...`
+// (a uid in the path de-anonymized anonymous hangout hosts), so the prefix
+// sweep above no longer finds them. Instead, collect the storage paths out of
+// the user's own messages.image_url and delete those objects directly.
+// Returns true only when every referenced object is gone (or none exist) —
+// same abort-before-auth-delete contract as deleteBucketObjects.
+async function deleteMessageImagesByReference(userId: string): Promise<boolean> {
+  try {
+    const url =
+      `${SUPABASE_URL}/rest/v1/messages` +
+      `?sender_id=eq.${encodeURIComponent(userId)}&image_url=not.is.null&select=image_url`;
+    const res = await fetch(url, {
+      headers: {
+        apikey: SERVICE_ROLE_KEY,
+        authorization: `Bearer ${SERVICE_ROLE_KEY}`,
+      },
+    });
+    if (!res.ok) {
+      console.warn(`message image_url query failed: ${res.status} ${await res.text()}`);
+      return false;
+    }
+    const rows = (await res.json()) as { image_url: string | null }[];
+    const marker = '/storage/v1/object/public/message-images/';
+    const paths = rows
+      .map((r) => r.image_url ?? '')
+      .filter((u) => u.includes(marker))
+      .map((u) => decodeURIComponent(u.slice(u.indexOf(marker) + marker.length)));
+    if (paths.length === 0) return true;
+    for (let i = 0; i < paths.length; i += 100) {
+      const chunk = paths.slice(i, i + 100);
+      const delRes = await fetch(`${SUPABASE_URL}/storage/v1/object/message-images`, {
+        method: 'DELETE',
+        headers: {
+          apikey: SERVICE_ROLE_KEY,
+          authorization: `Bearer ${SERVICE_ROLE_KEY}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ prefixes: chunk }),
+      });
+      if (!delRes.ok) {
+        console.warn(`message-images by-reference delete failed: ${delRes.status} ${await delRes.text()}`);
+        return false;
+      }
+    }
+    return true;
+  } catch (err) {
+    console.warn('message-images by-reference cleanup threw', err);
+    return false;
+  }
+}
+
 async function deleteAuthUser(userId: string): Promise<{ ok: boolean; error?: string }> {
   const res = await fetch(`${SUPABASE_URL}/auth/v1/admin/users/${encodeURIComponent(userId)}`, {
     method: 'DELETE',
@@ -201,8 +252,11 @@ Deno.serve(async (req: Request) => {
     //     storage failure must stop us BEFORE the point of no return, leaving
     //     the account intact and the request safely retriable.
     const avatarsOk = await deleteBucketObjects('avatars', uid);
+    // Legacy `{uid}/...` message-image objects (pre-0037) plus current
+    // `{conversationId}/...` objects found via the user's messages.
     const imagesOk = await deleteBucketObjects('message-images', uid);
-    if (!avatarsOk || !imagesOk) {
+    const refImagesOk = await deleteMessageImagesByReference(uid);
+    if (!avatarsOk || !imagesOk || !refImagesOk) {
       return json(500, {
         error: 'storage cleanup incomplete; account not deleted — please retry',
       });

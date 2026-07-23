@@ -107,6 +107,19 @@ const expectedTables = [
   'reports',
   'voices',
   'voice_votes',
+  // 0009–0028 additions — without these the script used to report PASS
+  // against a DB that the client can't actually run on.
+  'user_push_tokens',
+  'user_blocks',
+  'notification_prefs',
+  'comments',
+  'feed_events',
+  // 0027 feed views — the ONLY read path the client uses for content. A DB
+  // missing these renders every feed empty even though the tables exist.
+  'gigs_feed',
+  'hangouts_feed',
+  'voices_feed',
+  'comments_feed',
 ];
 
 for (const table of expectedTables) {

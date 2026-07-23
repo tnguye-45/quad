@@ -192,6 +192,13 @@ function RealChat({
   const [selected, setSelected] = useState<Set<string> | null>(null);
   const selecting = selected !== null;
   const scrollRef = useRef<ScrollView | null>(null);
+  // Survives a failed send so the retry reuses the already-uploaded object.
+  const uploadedImageRef = useRef<{
+    localUri: string;
+    url: string;
+    width: number;
+    height: number;
+  } | null>(null);
 
   function enterSelection(id: string) {
     setSelected(new Set([id]));
@@ -233,24 +240,39 @@ function RealChat({
     const text = draft.trim();
     if (!text && !pendingImage) return;
     if (pendingImage) {
-      setUploading(true);
-      const out = await uploadMessageImage(userId, pendingImage);
-      setUploading(false);
-      if ('error' in out) {
-        notify({ title: "Couldn't send image", message: out.error });
-        return;
+      if (!conversationId) return;
+      // Reuse a prior successful upload when retrying after a failed send —
+      // re-uploading orphans the first object in the bucket forever.
+      let img =
+        uploadedImageRef.current?.localUri === pendingImage
+          ? uploadedImageRef.current
+          : null;
+      if (!img) {
+        setUploading(true);
+        // Keyed by conversation id, NOT user id — a uid in the storage path
+        // is readable by every member and de-anonymizes an anonymous host.
+        const out = await uploadMessageImage(conversationId, pendingImage);
+        setUploading(false);
+        if ('error' in out) {
+          notify({ title: "Couldn't send image", message: out.error });
+          return;
+        }
+        img = { localUri: pendingImage, url: out.url, width: out.width, height: out.height };
+        uploadedImageRef.current = img;
       }
       setPendingImage(null);
       setDraft('');
       const ok = await send({
         body: text || undefined,
-        image: { url: out.url, width: out.width, height: out.height },
+        image: { url: img.url, width: img.width, height: img.height },
       });
       // Hand the draft back rather than silently eating what they typed.
       if (!ok) {
         setDraft(text);
         setPendingImage(pendingImage);
+        return;
       }
+      uploadedImageRef.current = null;
     } else {
       setDraft('');
       const ok = await send({ body: text });

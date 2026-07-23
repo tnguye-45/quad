@@ -1,8 +1,9 @@
-# Client contract — DB security migrations 0023–0032 (2026-07-20)
+# Client contract — DB security migrations 0023–0037 (updated 2026-07-23)
 
 What the client sessions (feeds/messaging session and auth/shell session) must
 know about the database after the security pass. Written by the DB session;
-source of truth is the migrations themselves.
+source of truth is the migrations themselves. §§1–9 describe 0023–0032; §10
+covers the 0033–0037 additions.
 
 ## 1. Feed reads MUST use the new views — base tables are locked down
 
@@ -126,7 +127,7 @@ non-prod DB that should accept test signups needs:
 
 ## 9. Applying + housekeeping
 
-- Fresh/live DB: run migrations `0021`–`0032` in order (live DB was last known
+- Fresh/live DB: run migrations `0021`–`0037` in order (live DB was last known
   at 0020), or paste the regenerated `_bundle.sql` for a fresh project.
 - `_bundle.sql` is **generated** — never hand-edit; run
   `node supabase/scripts/generate-bundle.mjs` after adding a migration.
@@ -136,3 +137,39 @@ non-prod DB that should accept test signups needs:
 - Known product caveat: an anonymous hangout host is necessarily visible to
   members *inside* the group chat (chat membership is real identity). The DB
   now prevents leaking it anywhere else.
+
+## 10. Additions since the original pass (0033–0037)
+
+**0033 — membership lock + comment reports.**
+`conversation_members` UPDATE is column-granted to `last_read_at` only (no
+other column can be written from the client). `reports.target_kind` gains
+`comment`; report a comment with the comment's own id, not the parent post's.
+
+**0034 — anon-DM lockdown, read RPC, profile limits.**
+`start_gig_conversation` refuses anonymous gig posters with `42501` ("this
+poster cannot be messaged") — keep the client-side `canMessage` gate as UX.
+Mark-as-read goes through the `mark_conversation_read(p_conversation_id)`
+RPC, which stamps `last_read_at` with the SERVER clock. Profile field limits
+(mirror client-side): display_name ≤ 60, initials ≤ 8, major ≤ 80, dorm ≤ 80,
+bio ≤ 240, links ≤ 10.
+
+**0035 — reports are write-only for clients.**
+The `reports: read own` SELECT policy and the table grant are gone: the
+resolver trigger stamps the REAL author id into `target_user_id` (including
+for anonymous content), so letting the reporter read their own row back was a
+de-anonymization oracle. Clients must never `select` from `reports`;
+"already reported" is signaled by `23505` on insert (treat as success).
+
+**0036 — per-author insert rate limits (errcode `54000`).**
+Rolling-hour caps on the content tables: gigs 5 · hangouts 5 · voices 10 ·
+comments 60 · messages 120. Same errcode as the reports limiter — map to
+"you're doing that too much, try again later" copy wherever the client
+inserts into these tables.
+
+**0037 — message-image paths carry no uid.**
+Upload path is now `{conversationId}/{stamp}-{rand}.jpg`; the storage INSERT
+policy checks conversation membership on the first path segment (a uid-first
+path no longer passes). Rationale: image URLs are visible to every member,
+and a uid in the path de-anonymized anonymous hangout hosts. The
+delete-account function now also removes objects referenced by the user's
+`messages.image_url` (the `{uid}/` prefix sweep only covers legacy objects).

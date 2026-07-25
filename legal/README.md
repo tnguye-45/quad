@@ -11,6 +11,10 @@ Legal documents for quad.
 
 - **`terms.md`** — an earlier, longer ToS draft (last updated 2026-05-25) that still contains unfilled `TODO` placeholders (governing law / venue). It is **not** linked from the app and should not be published as-is. Either fold anything worth keeping into `tos.md` and delete it, or have counsel finish it and swap it in deliberately.
 
+## Runtime mirror
+
+The app cannot import `.md` without a Metro text-loader, so `index.ts` holds inline copies of both documents and that is what actually renders on screen. `scripts/check-legal-sync.mjs` runs in both CI workflows and fails the build if either constant drifts from its `.md` (inline-code backticks are the only tolerated difference — the in-app renderer has no syntax for them). **Edit the `.md` first, then mirror it into `index.ts`.**
+
 ## In-app surfacing
 
 Wired into the app via `app/legal.tsx`, a modal screen that links out to the GitHub-rendered versions of the canonical docs:

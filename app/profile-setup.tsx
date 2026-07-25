@@ -1,6 +1,6 @@
 import * as ImagePicker from 'expo-image-picker';
 import { router } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   KeyboardAvoidingView,
   Platform,
@@ -86,8 +86,18 @@ export default function ProfileSetupScreen() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
+  // Hydrate ONCE, from the first profile that arrives. This effect exists
+  // because the screen can mount before auth-context has finished loading the
+  // profile — but merging on every `profile` change resurrects fields the user
+  // deliberately cleared: emptying the bio and then tapping the avatar runs
+  // uploadAvatar → refreshProfile() → a new `profile` object → the old bio is
+  // restored, and the user saves a bio they believe they deleted. The `cur ||`
+  // guards below still cover the narrow race where someone types before the
+  // profile lands; they just no longer run on later refreshes.
+  const hydratedRef = useRef(false);
   useEffect(() => {
-    if (!profile) return;
+    if (!profile || hydratedRef.current) return;
+    hydratedRef.current = true;
     setDisplayName((cur) => cur || profile.display_name || '');
     setYear((cur) => cur ?? profile.year);
     setMajor((cur) => cur || profile.major || '');

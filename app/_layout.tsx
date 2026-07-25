@@ -1,7 +1,7 @@
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { Stack, useRouter, useSegments, type ErrorBoundaryProps } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import 'react-native-reanimated';
 
@@ -54,12 +54,16 @@ function RootStack() {
       return;
     }
 
-    const first = segments[0] as string | undefined;
+    // Widen: expo-router types segments as a tuple whose shape depends on the
+    // GENERATED route types (.expo/types) — present locally, absent in CI, so
+    // indexing past the tuple length typechecks differently per machine.
+    const segs: readonly (string | undefined)[] = segments;
+    const first = segs[0];
     const inAuthGroup = first === '(auth)';
     // During password recovery the user IS signed in (a recovery session), but
     // must stay on the reset screen to set a new password — don't let the
     // "signed-in → go to tabs" rule bounce them away.
-    const inResetPassword = inAuthGroup && (segments[1] as string | undefined) === 'reset-password';
+    const inResetPassword = inAuthGroup && segs[1] === 'reset-password';
     const inProfileSetup = first === 'profile-setup';
     const inLegal = first === 'legal'; // legal screens are accessible signed-out too
     const inSplashOrWelcome = first === undefined || first === 'splash' || first === 'welcome';
@@ -96,12 +100,24 @@ function RootStack() {
   // Push notification routing: cold-start lookup once auth is settled and the
   // user is on a real tab screen, plus a live subscription for taps that
   // arrive while the app is running.
+  //
+  // getLastNotificationResponseAsync() returns the most recent tap for the
+  // app's WHOLE lifetime, not just the one that launched it — so it must be
+  // consulted exactly once per launch. `session` is a fresh object on every
+  // hourly TOKEN_REFRESHED, and display_name changes the moment profile setup
+  // saves; without this latch either one re-runs the lookup and yanks the user
+  // back into a chat they read an hour ago. The live subscription below is
+  // unaffected and must keep re-subscribing.
+  const coldStartCheckedRef = useRef(false);
   useEffect(() => {
     if (loading || !session || !profile?.display_name) return;
     let cancelled = false;
-    getColdStartRoute().then((route) => {
-      if (!cancelled && route) router.replace(route as never);
-    });
+    if (!coldStartCheckedRef.current) {
+      coldStartCheckedRef.current = true;
+      getColdStartRoute().then((route) => {
+        if (!cancelled && route) router.replace(route as never);
+      });
+    }
     const unsubscribe = subscribeToNotificationTaps((route) => {
       router.push(route as never);
     });

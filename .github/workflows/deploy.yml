@@ -33,8 +33,14 @@ jobs:
         run: npx tsc --noEmit
       - name: Lint
         run: npx eslint app lib components hooks constants scripts
+      - name: Test
+        run: npx jest --ci
       - name: DB contract check
         run: node scripts/check-contract.mjs
+      - name: Legal sync check
+        run: node scripts/check-legal-sync.mjs
+      - name: Migration bundle freshness
+        run: node scripts/check-bundle-fresh.mjs
 
   build:
     needs: checks

@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   FlatList,
   Pressable,
@@ -33,6 +33,11 @@ const CATEGORY_EMOJI: Record<CatKey, string> = {
   Errands: '🛒',
 };
 
+/** Search runs server-side, so pushing every keystroke down would be a
+ *  request per character. Long enough to coalesce typing, short enough that
+ *  the list doesn't feel stuck. */
+const SEARCH_DEBOUNCE_MS = 250;
+
 export default function GigsScreen() {
   const [selected, setSelected] = useState<CatKey>('All');
   const [refreshing, setRefreshing] = useState(false);
@@ -40,24 +45,54 @@ export default function GigsScreen() {
   const [query, setQuery] = useState('');
   const scheme = useColorScheme() ?? 'light';
   const c = Colors[scheme];
-  const { gigs, loading, hydrated, error, refresh, loadMore, hasMore } = usePosts();
+  const {
+    gigs,
+    loading,
+    hydrated,
+    error,
+    refresh,
+    loadMore,
+    hasMore,
+    gigFeed,
+    setGigFilter,
+    loadMoreGigFeed,
+  } = usePosts();
 
-  const trimmedQuery = query.trim().toLowerCase();
-  const visible = useMemo(() => {
-    const byCategory =
-      selected === 'All' ? gigs : gigs.filter((g) => g.category === selected);
-    if (!trimmedQuery) return byCategory;
-    return byCategory.filter((g) =>
-      [g.title, g.where, g.category].some((field) =>
-        field.toLowerCase().includes(trimmedQuery),
-      ),
+  const trimmedQuery = query.trim();
+  const category = selected === 'All' ? null : selected;
+  // Category and search are applied inside the gigs_feed query (posts-store)
+  // rather than over the loaded pages, so scrolling keeps paginating while a
+  // filter is on and an empty result really does mean the server has nothing.
+  useEffect(() => {
+    const t = setTimeout(
+      () => setGigFilter({ category, query: trimmedQuery }),
+      SEARCH_DEBOUNCE_MS,
     );
-  }, [gigs, selected, trimmedQuery]);
+    return () => clearTimeout(t);
+  }, [category, trimmedQuery, setGigFilter]);
 
-  const showLoading = !hydrated && loading && gigs.length === 0;
+  // "Is a filter on?" is answered by the local controls, not the store: the
+  // store trails them by the debounce, and reading it here would flash the
+  // unfiltered list for a beat after a chip tap.
+  const filtered = category !== null || trimmedQuery.length > 0;
+  const settled =
+    gigFeed.filter.category === category && gigFeed.filter.query === trimmedQuery;
+  const pending = filtered && (!settled || gigFeed.loading);
+  const visible = filtered ? (gigFeed.rows ?? []) : gigs;
+  const listError = filtered ? gigFeed.error : error;
+
+  // Stale-while-revalidate: the skeleton only replaces the list when there's
+  // nothing under it, so refining a search doesn't strobe on every keystroke.
+  const showLoading = filtered
+    ? pending && gigFeed.rows === null
+    : !hydrated && loading && gigs.length === 0;
   // `hydrated` flips true even when the fetch threw, so without the error check
   // a failed load renders "No gigs yet" directly under the retry row.
-  const isEmpty = hydrated && !error && visible.length === 0;
+  const isEmpty =
+    !showLoading &&
+    !listError &&
+    visible.length === 0 &&
+    (filtered ? !pending : hydrated);
 
   function toggleSearch() {
     setSearching((on) => {
@@ -79,7 +114,10 @@ export default function GigsScreen() {
     <ThemedView style={[styles.screen, { backgroundColor: c.background }]}>
       <ScreenHeader
         title="Gigs"
-        subtitle={`notre dame · ${gigs.length} open`}
+        // Not "N open": gigs_feed carries accepted/done/cancelled rows too,
+        // and this only ever counted the pages loaded so far. Count what is
+        // actually on screen and claim nothing about status.
+        subtitle={`notre dame · ${visible.length} gigs`}
         rightActions={[
           {
             icon: 'map',
@@ -128,7 +166,7 @@ export default function GigsScreen() {
         renderItem={({ item }) => <GigRow gig={item} c={c} />}
         ListHeaderComponent={
           <>
-            {error && !showLoading ? (
+            {listError && !showLoading ? (
               <RetryRow message="Couldn't load gigs." onRetry={refresh} c={c} />
             ) : null}
             <ScrollView
@@ -215,7 +253,12 @@ export default function GigsScreen() {
         }
         onEndReachedThreshold={0.4}
         onEndReached={() => {
-          if (selected === 'All' && hasMore.gigs) {
+          // Pagination follows the filter now. It used to be skipped entirely
+          // whenever a category or search was active, so the list ended at
+          // whatever page 1 happened to contain.
+          if (filtered) {
+            if (gigFeed.hasMore) void loadMoreGigFeed();
+          } else if (hasMore.gigs) {
             void loadMore('gigs');
           }
         }}

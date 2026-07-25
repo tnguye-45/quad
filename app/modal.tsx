@@ -18,12 +18,25 @@ import {
 } from '@/lib/posts-store';
 import { isPaymentLink, linkEmoji, paymentHandleFromUrl } from '@/lib/profile-links';
 
-function normalizeUrl(raw: string): string {
-  return raw.match(/^https?:\/\//i) ? raw : `https://${raw}`;
+// Profile `links` have no URL constraint at the DB level, so a crafted client
+// can store any scheme on its own profile (javascript:, intent:, file:, a
+// custom app scheme). Parse and allowlist http/https rather than pattern-match
+// the prefix — today these only render on the owner's own profile, but the
+// same rows are what a public profile screen would show.
+function safeHttpUrl(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  try {
+    const u = new URL(/^[a-z][a-z0-9+.-]*:/i.test(trimmed) ? trimmed : `https://${trimmed}`);
+    return u.protocol === 'http:' || u.protocol === 'https:' ? u.toString() : null;
+  } catch {
+    return null;
+  }
 }
 
 async function openLink(url: string) {
-  const target = normalizeUrl(url.trim());
+  const target = safeHttpUrl(url);
+  if (!target) return;
   if (Platform.OS === 'web') {
     Linking.openURL(target);
     return;

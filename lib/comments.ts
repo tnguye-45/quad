@@ -210,13 +210,26 @@ export function useComments(
     if (!realSession) return;
     // Optimistic: drop locally; rely on realtime DELETE to reconcile peers.
     setComments((cur) => cur.filter((c) => c.id !== commentId));
-    const { error: e } = await supabase.from('comments').delete().eq('id', commentId);
+    // Ask for the deleted ids back. A DELETE that RLS filters down to zero
+    // rows is NOT an error — PostgREST answers 204 with no error object — so
+    // an error-only check leaves the comment gone from this list while it is
+    // still on the server. `id` is a granted column, so RETURNING it is safe
+    // on the locked comments table (CLIENT_CONTRACT §1).
+    const { data, error: e } = await supabase
+      .from('comments')
+      .delete()
+      .eq('id', commentId)
+      .select('id');
     if (e) {
       console.warn('[comments] delete failed:', e.message);
       setError(e.message);
       // Reconcile if the delete was denied.
       fetchAll();
+      return;
     }
+    // Silent: the thread is already on screen, and a spinner here would be a
+    // worse lie than the momentary optimistic removal we're undoing.
+    if (!data || data.length === 0) fetchAll({ silent: true });
   };
 
   return useMemo(

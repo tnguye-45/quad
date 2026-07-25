@@ -1,26 +1,36 @@
 // quad — send-new-post-push Edge Function
 //
-// Fans out a push to *every other authenticated user* when a new gig or
-// hangout is posted. The trigger that calls this lives in a future migration
-// (owned by Engineer B's push track); this function is shaped so the trigger
-// can post the same Supabase DB-webhook payload as send-message-push.
+// Fans out a push to *every other authenticated user* when a new gig, hangout
+// or voice is posted. The DB triggers that call it are trg_gigs_push /
+// trg_hangouts_push (0012) and trg_voices_push (0019), all sharing
+// notify_new_post(), which posts the standard Supabase DB-webhook payload.
 //
-// Per-user opt-in is enforced via public.notification_prefs:
-//   * For new gigs:     pref column `new_gigs`     (default true).
-//   * For new hangouts: pref column `new_hangouts` (default true).
-// Missing row → defaults (per migration 0015 + the COALESCE in this file).
+// Per-user opt-in is enforced via public.notification_prefs, and the default
+// for a MISSING row differs per kind (migration 0015):
+//   * new gigs:     pref column `new_gigs`     — default true  (opt-out)
+//   * new hangouts: pref column `new_hangouts` — default true  (opt-out)
+//   * new voices:   pref column `new_voices`   — default FALSE (opt-in)
+// Voices are opt-in because the feed is high-volume; see resolveRecipients,
+// which flips the query direction accordingly.
 //
 // Payload contract (matches Supabase DB webhook):
 //   {
 //     "type": "INSERT",
-//     "table": "gigs" | "hangouts",
+//     "table": "gigs" | "hangouts" | "voices",
 //     "schema": "public",
-//     "record": { id, title, poster_id|host_id, anonymous, ... }
+//     "record": { id, title|body, poster_id|host_id|author_id, anonymous, ... }
 //   }
 //
 // Notification data:
 //   { kind: 'gig',     gigId: <uuid> }       → routes to /gig/<id>
-//   { kind: 'hangout', hangoutId: <uuid> }   → routes to a future hangout detail
+//   { kind: 'hangout', hangoutId: <uuid> }   → routes to /hangout/<id>
+//   { kind: 'voice',   voiceId: <uuid> }     → routes to /voice/<id>
+//
+// ANONYMITY: voices are an anonymous surface (0027 / 0034 / 0037). The voice
+// notification may carry only the body and the topic — never the author's name
+// and never anything derived from author_id. author_id is used server-side
+// only, to exclude the author from their own push and to apply the two-way
+// block filter.
 
 // deno-lint-ignore-file no-explicit-any
 /* eslint-disable */
@@ -61,13 +71,16 @@ const BATCH_SIZE = 100;
 
 type GigRecord = { id: string; title: string; poster_id: string; anonymous?: boolean };
 type HangoutRecord = { id: string; title: string; host_id: string; anonymous?: boolean };
+type VoiceRecord = { id: string; body: string; topic?: string; author_id: string; anonymous?: boolean };
 
 type WebhookPayload = {
   type: 'INSERT' | 'UPDATE' | 'DELETE';
-  table: 'gigs' | 'hangouts' | string;
+  table: 'gigs' | 'hangouts' | 'voices' | string;
   schema: string;
-  record?: GigRecord | HangoutRecord | null;
+  record?: GigRecord | HangoutRecord | VoiceRecord | null;
 };
+
+type PrefColumn = 'new_gigs' | 'new_hangouts' | 'new_voices';
 
 type ExpoTicket =
   | { status: 'ok'; id: string }
@@ -110,10 +123,14 @@ async function pgSelectAll<T>(path: string, pageSize = 1000): Promise<T[]> {
   }
 }
 
-async function pgDeleteToken(userId: string): Promise<void> {
+// Deletes ONE dead device row. Scoped to (user_id, expo_push_token) because
+// since migration 0040 a user may have several rows — deleting by user_id
+// alone would unregister their other, healthy devices on the strength of one
+// DeviceNotRegistered receipt.
+async function pgDeleteToken(userId: string, token: string): Promise<void> {
   const url = `${SUPABASE_URL}/rest/v1/user_push_tokens?user_id=eq.${encodeURIComponent(
     userId,
-  )}`;
+  )}&expo_push_token=eq.${encodeURIComponent(token)}`;
   const res = await fetch(url, {
     method: 'DELETE',
     headers: {
@@ -133,16 +150,30 @@ function chunk<T>(arr: T[], size: number): T[][] {
   return out;
 }
 
-// Build the recipient list: every user with a push token, EXCEPT the author,
-// EXCEPT anyone the author has blocked (or who has blocked the author), AND
-// only users whose opt-in pref is true (default true).
+// Collapse whitespace and clip to `max`, ellipsis included in the budget —
+// same helper as send-new-comment-push.
+function clip(text: string, max: number): string {
+  const trimmed = text.replace(/\s+/g, ' ').trim();
+  if (trimmed.length <= max) return trimmed;
+  return `${trimmed.slice(0, max - 1).trimEnd()}…`;
+}
+
+// Build the recipient list: every device token, EXCEPT the author's, EXCEPT
+// anyone the author has blocked (or who has blocked the author), AND only
+// users whose pref for this kind resolves to true. `prefDefault` is what a
+// MISSING notification_prefs row means for this kind (0015: true for
+// gigs/hangouts, false for voices) and decides which side of the pref table we
+// query.
 async function resolveRecipients(
   authorId: string,
-  prefColumn: 'new_gigs' | 'new_hangouts',
+  prefColumn: PrefColumn,
+  prefDefault: boolean,
 ): Promise<{ userId: string; token: string }[]> {
-  // 1) All push tokens (paginated — see pgSelectAll).
+  // 1) All push tokens (paginated — see pgSelectAll). Since 0040 a user can
+  // have several rows, so user_id alone is no longer a total order and pages
+  // could shear across a tie; order by the full primary key.
   const tokens = await pgSelectAll<{ user_id: string; expo_push_token: string }>(
-    `user_push_tokens?select=user_id,expo_push_token&order=user_id.asc`,
+    `user_push_tokens?select=user_id,expo_push_token&order=user_id.asc,expo_push_token.asc`,
   );
 
   let candidates = tokens.filter(
@@ -171,16 +202,29 @@ async function resolveRecipients(
   }
   if (candidates.length === 0) return [];
 
-  // 3) Apply notification_prefs. Anyone with the pref set to false drops out;
-  // missing row defaults to true (the table's default). Query the opted-OUT
-  // set directly instead of an in-list of every candidate — an in-list of
+  // 3) Apply notification_prefs. Either way we query one side of the pref
+  // table directly rather than an in-list of every candidate — an in-list of
   // thousands of uuids overflows the URL long before the row cap bites.
-  // Tolerate the table not existing yet.
-  const prefs = await pgSelectAll<{ user_id: string }>(
-    `notification_prefs?${prefColumn}=eq.false&select=user_id&order=user_id.asc`,
-  ).catch(() => [] as { user_id: string }[]);
-  const optedOut = new Set<string>(prefs.map((p) => p.user_id));
-  candidates = candidates.filter((c) => !optedOut.has(c.user_id));
+  // Tolerate the table not existing yet; note that the tolerant fallback for
+  // an opt-in kind is "send to nobody", which is the safe direction.
+  if (prefDefault) {
+    // Opt-out kind: everyone is a recipient unless they set the pref false.
+    const optedOutRows = await pgSelectAll<{ user_id: string }>(
+      `notification_prefs?${prefColumn}=eq.false&select=user_id&order=user_id.asc`,
+    ).catch(() => [] as { user_id: string }[]);
+    const optedOut = new Set<string>(optedOutRows.map((p) => p.user_id));
+    candidates = candidates.filter((c) => !optedOut.has(c.user_id));
+  } else {
+    // Opt-in kind (voices): only users who explicitly set the pref true. A
+    // user with NO prefs row has not opted in, so the opted-out query used for
+    // the other kinds would have pushed every voice to all of campus — the
+    // exact opposite of "High volume — off by default".
+    const optedInRows = await pgSelectAll<{ user_id: string }>(
+      `notification_prefs?${prefColumn}=eq.true&select=user_id&order=user_id.asc`,
+    ).catch(() => [] as { user_id: string }[]);
+    const optedIn = new Set<string>(optedInRows.map((p) => p.user_id));
+    candidates = candidates.filter((c) => optedIn.has(c.user_id));
+  }
 
   return candidates.map((c) => ({ userId: c.user_id, token: c.expo_push_token }));
 }
@@ -214,6 +258,9 @@ async function sendBatch(
   }
   const payload = (await res.json()) as ExpoTicketResponse;
   const tickets = payload.data ?? [];
+  // Tickets line up positionally with `messages`, which was mapped 1:1 from
+  // `batch` — still true now that a user can appear in `batch` more than once
+  // (one entry per device), so recipient.token is the token that failed.
   for (let i = 0; i < tickets.length; i++) {
     const ticket = tickets[i];
     const recipient = batch[i];
@@ -224,7 +271,7 @@ async function sendBatch(
         `Expo ticket error for user=${recipient.userId}: ${ticket.message} (${code ?? 'no-code'})`,
       );
       if (code === 'DeviceNotRegistered') {
-        await pgDeleteToken(recipient.userId);
+        await pgDeleteToken(recipient.userId, recipient.token);
       }
     }
   }
@@ -252,40 +299,75 @@ Deno.serve(async (req: Request) => {
   }
 
   const table = payload.table;
-  const rec = payload.record as GigRecord & HangoutRecord & { poster_id?: string; host_id?: string } | null;
-  if (!rec || !rec.id || !rec.title) {
+  // Validation is per-table: gigs and hangouts have `title`, voices have
+  // `body`. A single `!rec.title` guard up front (as this had) rejects every
+  // voice before the dispatch is even reached.
+  const rec = payload.record as
+    | (GigRecord & HangoutRecord & VoiceRecord & {
+        poster_id?: string;
+        host_id?: string;
+        author_id?: string;
+        title?: string;
+        body?: string;
+        topic?: string;
+      })
+    | null;
+  if (!rec || !rec.id) {
     return json(400, { error: 'malformed record' });
   }
 
   let authorId: string;
-  let prefColumn: 'new_gigs' | 'new_hangouts';
-  let kind: 'gig' | 'hangout';
+  let prefColumn: PrefColumn;
+  let prefDefault: boolean;
+  let kind: 'gig' | 'hangout' | 'voice';
   let title: string;
+  let bodySource: string;
   let data: Record<string, unknown>;
 
   if (table === 'gigs') {
     if (!rec.poster_id) return json(400, { error: 'missing poster_id' });
+    if (!rec.title) return json(400, { error: 'missing title' });
     authorId = rec.poster_id;
     prefColumn = 'new_gigs';
+    prefDefault = true;
     kind = 'gig';
     title = 'New gig on quad';
+    bodySource = rec.title;
     data = { kind: 'gig', gigId: rec.id };
   } else if (table === 'hangouts') {
     if (!rec.host_id) return json(400, { error: 'missing host_id' });
+    if (!rec.title) return json(400, { error: 'missing title' });
     authorId = rec.host_id;
     prefColumn = 'new_hangouts';
+    prefDefault = true;
     kind = 'hangout';
     title = 'New hangout on quad';
+    bodySource = rec.title;
     data = { kind: 'hangout', hangoutId: rec.id };
+  } else if (table === 'voices') {
+    if (!rec.author_id) return json(400, { error: 'missing author_id' });
+    if (!rec.body) return json(400, { error: 'missing body' });
+    // author_id goes no further than resolveRecipients (author exclusion +
+    // block filter). Nothing below derives a name, an initial or a profile
+    // lookup from it: the notification carries only the topic and the body,
+    // because a voice is anonymous by default and the push must not become
+    // the one place that says who wrote it.
+    authorId = rec.author_id;
+    prefColumn = 'new_voices';
+    prefDefault = false; // 0015: new_voices defaults to false — opt-in only.
+    kind = 'voice';
+    title = rec.topic ? `New voice on quad · ${clip(rec.topic, 24)}` : 'New voice on quad';
+    bodySource = rec.body;
+    data = { kind: 'voice', voiceId: rec.id };
   } else {
     return json(200, { skipped: true, reason: `unsupported table ${table}` });
   }
 
-  // Trim the body — Expo wraps long titles.
-  const body = rec.title.length > 180 ? `${rec.title.slice(0, 177)}…` : rec.title;
+  // Trim — Expo wraps long text and iOS truncates around ~178 chars.
+  const body = clip(bodySource, 180);
 
   try {
-    const recipients = await resolveRecipients(authorId, prefColumn);
+    const recipients = await resolveRecipients(authorId, prefColumn, prefDefault);
     if (recipients.length === 0) {
       return json(200, { sent: 0, reason: 'no opted-in recipients with tokens', kind });
     }

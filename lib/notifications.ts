@@ -32,6 +32,36 @@ async function ensureAndroidChannel() {
   });
 }
 
+function easProjectId(): string | undefined {
+  return (
+    Constants.expoConfig?.extra?.eas?.projectId ??
+    Constants.easConfig?.projectId
+  );
+}
+
+// This device's Expo token, remembered from the last successful registration.
+// Migration 0040 keys user_push_tokens by (user_id, expo_push_token), so
+// sign-out has to delete THIS device's row and leave the user's other devices
+// alone — which means we need the token at clear time, when asking Expo for it
+// again may no longer work (permission revoked, offline).
+let cachedToken: string | null = null;
+
+// Asks Expo for this device's token. Returns null wherever a token can't
+// exist (web, simulator, denied permission, missing projectId, Expo
+// unreachable).
+async function fetchDeviceToken(): Promise<string | null> {
+  if (Platform.OS === 'web' || !Device.isDevice) return null;
+  const projectId = easProjectId();
+  if (!projectId) return null;
+  try {
+    const { data: token } = await Notifications.getExpoPushTokenAsync({ projectId });
+    return token ?? null;
+  } catch (err) {
+    console.warn('[push] getExpoPushTokenAsync failed', err);
+    return null;
+  }
+}
+
 // Returns the Expo push token for this device, or null if we can't get one
 // (web, simulator, denied permission, missing projectId). Persists the token
 // to user_push_tokens so the server can look it up when sending pushes.
@@ -49,31 +79,28 @@ export async function registerForPushToken(userId: string): Promise<string | nul
   }
   if (!granted) return null;
 
-  const projectId =
-    Constants.expoConfig?.extra?.eas?.projectId ??
-    Constants.easConfig?.projectId;
-  if (!projectId) {
+  if (!easProjectId()) {
     console.warn('[push] missing EAS projectId — skipping token registration');
     return null;
   }
 
-  try {
-    const { data: token } = await Notifications.getExpoPushTokenAsync({ projectId });
-    if (!token) return null;
-    const { error } = await supabase
-      .from('user_push_tokens')
-      .upsert(
-        { user_id: userId, expo_push_token: token, updated_at: new Date().toISOString() },
-        { onConflict: 'user_id' },
-      );
-    if (error) {
-      console.warn('[push] failed to save token', error.message);
-    }
-    return token;
-  } catch (err) {
-    console.warn('[push] getExpoPushTokenAsync failed', err);
-    return null;
+  const token = await fetchDeviceToken();
+  if (!token) return null;
+  cachedToken = token;
+
+  // onConflict must name the full (user_id, expo_push_token) key from 0040:
+  // one row per device, so registering an iPad no longer overwrites — and
+  // silences — the same student's phone.
+  const { error } = await supabase
+    .from('user_push_tokens')
+    .upsert(
+      { user_id: userId, expo_push_token: token, updated_at: new Date().toISOString() },
+      { onConflict: 'user_id,expo_push_token' },
+    );
+  if (error) {
+    console.warn('[push] failed to save token', error.message);
   }
+  return token;
 }
 
 // Notification tap routing. The server should attach a `data` payload like:
@@ -124,15 +151,27 @@ export function subscribeToNotificationTaps(onRoute: (route: string) => void) {
   return () => sub.remove();
 }
 
-// Clears the device's saved token. Call on sign-out so the device stops
-// receiving notifications for the previous account.
+// Clears THIS device's saved token. Call on sign-out so the device stops
+// receiving notifications for the previous account — without unregistering the
+// user's other devices, which is what a delete by user_id alone would do now
+// that 0040 allows one row per device.
 export async function clearPushToken(userId: string) {
   if (Platform.OS === 'web') return;
-  const { error } = await supabase
-    .from('user_push_tokens')
-    .delete()
-    .eq('user_id', userId);
+  const token = cachedToken ?? (await fetchDeviceToken());
+  let query = supabase.from('user_push_tokens').delete().eq('user_id', userId);
+  if (token) {
+    query = query.eq('expo_push_token', token);
+  } else {
+    // Couldn't resolve this device's token — permission was revoked, or Expo
+    // is unreachable. Fall back to clearing every row for the user: leaving
+    // this device registered would keep the signed-out account's message
+    // previews arriving on its lock screen, which is worse than the other
+    // devices going quiet until they re-register on their next launch.
+    console.warn('[push] device token unknown — clearing all token rows for user');
+  }
+  const { error } = await query;
   if (error) {
     console.warn('[push] failed to clear token', error.message);
   }
+  cachedToken = null;
 }

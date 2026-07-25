@@ -1,7 +1,7 @@
 -- ═══════════════════════════════════════════════════════════════════════════
 -- quad — GENERATED migration bundle. DO NOT EDIT BY HAND.
 -- Regenerate with: node supabase/scripts/generate-bundle.mjs
--- Contains, in order: 0001, 0002, 0003, 0004, 0005, 0006, 0007, 0008, 0009, 0010, 0011, 0012, 0013, 0014, 0015, 0016, 0017, 0018, 0019, 0020, 0021, 0022, 0023, 0024, 0025, 0026, 0027, 0028, 0029, 0030, 0031, 0032, 0033, 0034, 0035, 0036, 0037
+-- Contains, in order: 0001, 0002, 0003, 0004, 0005, 0006, 0007, 0008, 0009, 0010, 0011, 0012, 0013, 0014, 0015, 0016, 0017, 0018, 0019, 0020, 0021, 0022, 0023, 0024, 0025, 0026, 0027, 0028, 0029, 0030, 0031, 0032, 0033, 0034, 0035, 0036, 0037, 0038, 0039, 0040
 -- ═══════════════════════════════════════════════════════════════════════════
 
 -- ═══════════════ 0001_schema.sql ═══════════════
@@ -3045,3 +3045,429 @@ create policy "message-images: member insert"
     -- Non-uuid first segments fail the cast loudly (fail closed).
     and public.is_conversation_member(((storage.foldername(name))[1])::uuid)
   );
+
+-- ═══════════════ 0038_anonymous_hangout_chat_lockdown.sql ═══════════════
+
+-- quad — anonymous hangouts lose the group chat (closes the last de-anonymization
+-- path), plus two hangout-join defects the same function has to fix.
+--
+-- ─────────────── 1) the hole ───────────────
+--
+-- 0027 masks host_id in hangouts_feed, 0034 refuses DMs to anonymous gig posters,
+-- 0037 took the uploader's uid out of message-image paths. conversation_members was
+-- never brought under any of it. Its SELECT policy (0002) is
+--
+--   using (user_id = auth.uid() or public.is_conversation_member(conversation_id))
+--
+-- and profiles is `using (true)` for every authenticated user. So any member of a
+-- hangout's group chat can read every other member's real uid and resolve it to a
+-- name — including the host who chose to be anonymous.
+--
+-- This is not a theoretical read. The shipping UI does it: app/connections.tsx
+-- (the "Obsidian map") builds its ego graph from conversation_members of the
+-- caller's own conversations, so an anonymous host lands on their attendee's map as
+-- a ring-1 node labelled "hung out", captioned with display name, major, dorm and
+-- bio. lib/messaging.ts's hydrateOtherReads puts the same uid in otherReads[0], and
+-- app/chat/[id].tsx hands it straight to the block/report menu — while the chat
+-- header dutifully renders "Anonymous". Alice hosts anonymously, Bob RSVPs, the
+-- group chat has exactly two members, and the other member is the host. With the
+-- anon key (public by design) it is one query, no UI required.
+--
+-- Same class as the hole 0034 called "a one-RPC, no-consent mass de-anonymizer",
+-- reached through hangouts instead of gigs.
+--
+-- ─────────────── 2) the fix, and the two designs rejected ───────────────
+--
+-- CHOSEN: mirror 0034's rule. An anonymous hangout does not get a group conversation
+-- at all. RSVP still works — the attendee row is still inserted, capacity is still
+-- enforced, hangouts_feed.going_count still increments — but join_hangout returns
+-- NULL for the conversation id and creates no membership row. The identity never
+-- enters a readable table, so there is nothing to mask.
+--
+-- REJECTED — masking conversation_members behind a definer view. Column-level
+-- revoke cannot work here: the client legitimately filters on user_id = auth.uid()
+-- to read its own last_read_at and to delete its own membership row on block/leave,
+-- and Postgres requires SELECT privilege on any column named in a WHERE clause. The
+-- alternative — tightening the RLS policy to own-rows-only and serving partners
+-- through a view — drops other members' UPDATE events out of the supabase_realtime
+-- publication, which silently kills read receipts for EVERY conversation, not just
+-- anonymous ones. Trading a working feature for every user against a leak affecting
+-- one is the wrong trade.
+--
+-- REJECTED — removing the anonymous option from hangouts entirely. Bigger product
+-- change than the defect requires, and it throws away a legitimate use (posting a
+-- hangout you'd rather not have your name on in the feed).
+--
+-- THE COST, stated plainly: attendees of an anonymous hangout have no group chat to
+-- coordinate in. That is a real feature loss and it is the price of the anonymity
+-- promise. If that trade is later judged wrong, the honest move is to drop the
+-- anonymous flag for hangouts — NOT to reinstate the chat and re-open this hole.
+--
+-- ─────────────── 3) pre-existing data ───────────────
+--
+-- Conversations tied to anonymous hangouts may already exist. This migration does
+-- NOT delete them: writing destructive DDL against rows nobody has inspected is how
+-- you lose real chat history to a security patch. They must be reviewed by hand:
+--
+--   select c.id, c.hangout_id, count(m.user_id) as members
+--     from public.conversations c
+--     join public.hangouts h on h.id = c.hangout_id and h.anonymous
+--     left join public.conversation_members m on m.conversation_id = c.id
+--    group by c.id, c.hangout_id;
+--
+-- Anything that returns is a live leak — delete those conversations deliberately,
+-- after confirming what they contain. The client ships defense-in-depth for legacy
+-- rows in the same commit (lib/connections.ts drops anonymous-hangout groups from
+-- the orbit graph; app/chat/[id].tsx withholds a masked partner's uid from the
+-- block/report menu), so the app cannot surface them even before the cleanup runs.
+--
+-- ─────────────── 4) client-visible breakage (intentional) ───────────────
+--
+--   * join_hangout returns NULL for an anonymous hangout. A null conversation id is
+--     now a SUCCESS value, not a failure — callers that treated it as "couldn't join
+--     the group chat" must stop. Fixed in app/hangout/[id].tsx in this commit.
+--   * hangout_attendees can no longer be deleted directly (see §7); leave_hangout is
+--     the only path.
+
+-- ─────────────── 5) join_hangout ───────────────
+-- Body carries three changes over 0029: the anonymous short-circuit above, the
+-- existing-attendee capacity exemption below, and hoisting the attendee insert above
+-- the conversation work so the anonymous path still RSVPs.
+create or replace function public.join_hangout(p_hangout_id uuid)
+returns uuid
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_me       uuid := auth.uid();
+  v_host     uuid;
+  v_max      int;
+  v_anon     boolean;
+  v_count    int;
+  v_already  boolean;
+  v_conv_id  uuid;
+begin
+  if v_me is null then
+    raise exception 'not authenticated' using errcode = '28000';
+  end if;
+
+  select host_id, max_people, anonymous
+    into v_host, v_max, v_anon
+    from public.hangouts where id = p_hangout_id;
+  if v_host is null then
+    raise exception 'hangout not found' using errcode = 'P0002';
+  end if;
+
+  if v_me <> v_host and public.is_blocked(v_host) then
+    raise exception 'you cannot join this hangout' using errcode = '42501';
+  end if;
+
+  v_already := exists (
+    select 1 from public.hangout_attendees
+     where hangout_id = p_hangout_id and user_id = v_me
+  );
+
+  -- Capacity. The host is always in their own hangout, and an attendee who is
+  -- ALREADY in must not be turned away from it — they re-enter this function every
+  -- time the app needs the conversation id after a cold start. 0029 checked capacity
+  -- unconditionally and raised 23514 before ever reaching the idempotent insert, so
+  -- the moment a hangout filled up its existing attendees were permanently locked
+  -- out of their own group chat with "Couldn't open the group chat. Try again." —
+  -- and retrying never helped. The 0025 BEFORE INSERT trigger already exempts
+  -- existing attendees for exactly this reason; this check was pre-empting it.
+  if v_me <> v_host and not v_already then
+    select count(*) into v_count
+      from public.hangout_attendees where hangout_id = p_hangout_id;
+    if v_count >= v_max then
+      raise exception 'hangout is full' using errcode = '23514';
+    end if;
+  end if;
+
+  -- RSVP (idempotent). Runs for anonymous hangouts too — the attendee list and the
+  -- going_count are not the leak; the readable membership row is.
+  insert into public.hangout_attendees (hangout_id, user_id)
+    values (p_hangout_id, v_me)
+    on conflict do nothing;
+
+  -- Anonymous host: stop here. No conversation, no membership row, no uid for a
+  -- co-member to read back. See the header for why masking was not the answer.
+  if v_anon then
+    return null;
+  end if;
+
+  select id into v_conv_id from public.conversations
+    where hangout_id = p_hangout_id limit 1;
+
+  if v_conv_id is null then
+    insert into public.conversations (hangout_id) values (p_hangout_id)
+      returning id into v_conv_id;
+    -- Seed with every existing attendee plus the host; on conflict keeps it idempotent.
+    insert into public.conversation_members (conversation_id, user_id)
+    select v_conv_id, a.user_id from public.hangout_attendees a
+      where a.hangout_id = p_hangout_id
+    union
+    select v_conv_id, v_host
+    on conflict do nothing;
+  else
+    insert into public.conversation_members (conversation_id, user_id)
+      values (v_conv_id, v_me)
+      on conflict do nothing;
+  end if;
+
+  return v_conv_id;
+end;
+$$;
+
+revoke all on function public.join_hangout(uuid) from public;
+grant execute on function public.join_hangout(uuid) to authenticated;
+
+-- ─────────────── 6) hangout_conversation_id ───────────────
+-- Opening a chat is a read. It was being served by calling join_hangout purely for
+-- its return value — a mutation used as a lookup, which is what made the capacity
+-- bug above fatal instead of merely wrong. Definer so it can see conversations the
+-- caller is a member of without re-entering conversation_members RLS; returns NULL
+-- (not an error) when there is no conversation or the caller isn't in it, so an
+-- anonymous hangout and a not-yet-joined one look the same to the client.
+create or replace function public.hangout_conversation_id(p_hangout_id uuid)
+returns uuid
+language sql
+security definer
+stable
+set search_path = public
+as $$
+  select c.id
+    from public.conversations c
+    join public.conversation_members m
+      on m.conversation_id = c.id and m.user_id = auth.uid()
+   where c.hangout_id = p_hangout_id
+   limit 1;
+$$;
+
+revoke all on function public.hangout_conversation_id(uuid) from public;
+grant execute on function public.hangout_conversation_id(uuid) to authenticated;
+
+-- ─────────────── 7) hangout_attendees: leave via the RPC only ───────────────
+-- 0002's "leave self" policy let a client delete its own attendee row directly.
+-- leave_hangout (definer) removes the attendee row AND the conversation_members
+-- row; the raw delete removes only the former, so a hostile client could drop off
+-- the attendee list while staying in the hangout's group chat — reading it forever
+-- with no RSVP to show for it. Verified the shipping client never deletes this table
+-- directly (it only selects its own rows and inserts the host's implicit self-RSVP),
+-- so removing the policy costs nothing.
+--
+-- The INSERT policy is deliberately KEPT — 0025's header explains that the host's
+-- self-RSVP in lib/posts-store.tsx writes through it, and that the capacity trigger,
+-- not the policy, is what enforces the limit.
+drop policy if exists "hangout_attendees: leave self" on public.hangout_attendees;
+
+-- ═══════════════ 0039_content_write_log.sql ═══════════════
+
+-- quad — rate-limit an append-only write ledger, not live rows
+-- (closes the delete-and-repost bypass in 0036)
+--
+-- 0036 counts rows that CURRENTLY EXIST:
+--
+--   select count(*) from public.gigs
+--    where poster_id = auth.uid() and posted_at > now() - interval '1 hour';
+--
+-- but every one of the five governed tables also has a delete-own RLS policy
+-- — gigs (0002:72), hangouts (0002:94), voices (0005:97), comments (0019),
+-- messages (0021) — so the number the limiter reads is entirely under the
+-- attacker's control.
+--
+-- Failure scenario: post a gig → trg_gigs_push (0012) fires notify_new_post →
+-- send-new-post-push delivers the attacker-controlled title to EVERY
+-- registered device on campus → delete the gig → the count drops back to zero
+-- → repeat. The push is already delivered; deleting the row cannot unsend it.
+-- The loop is unbounded. This is exactly the "one hostile student with a
+-- script could blast the whole campus" scenario 0036's own header says it
+-- prevents, and as written it does not.
+--
+-- Fix: meter an append-only ledger the client has no privilege to touch.
+-- public.content_write_log gets one row per governed insert, written by the
+-- same SECURITY DEFINER trigger that does the check, and the count reads the
+-- ledger instead of the content table. Deleting your gig no longer un-spends
+-- the quota, because the quota was never stored in the gig.
+--
+-- Rejected alternatives:
+--   * Revoke the delete-own policies. Students legitimately delete their own
+--     posts, and 0021's message delete is a shipped feature. Punishing every
+--     honest user to close a limiter hole is the wrong trade.
+--   * Soft-delete (deleted_at) across all five tables. Five schema changes,
+--     five RLS rewrites, and every feed view and count from 0027 onward would
+--     have to learn to filter — an enormous blast radius for a limiter fix,
+--     and it also keeps deleted content on disk, which the privacy policy
+--     does not promise.
+--   * A bucketed counter table keyed (author, kind, hour_start), swept by
+--     pg_cron. Fewer rows, but fixed hour buckets let a burst straddle a
+--     boundary and land 2× the limit inside a 60-second span, and it adds a
+--     scheduled-job dependency. A row-per-write ledger keeps the window truly
+--     rolling and needs no cron.
+--
+-- NOT affected, so nobody "fixes" it later: reports_resolve_target's 20/hr
+-- limit (0030, kept in 0033) counts public.reports, and reports has NO client
+-- delete policy — a reporter cannot delete their own report rows, so that
+-- count is already append-only in practice. Leave it counting reports.
+--
+-- Client-visible breakage: none. Same errcode 54000, same message shape, same
+-- limits (gigs 5 · hangouts 5 · voices 10 · comments 60 · messages 120), same
+-- service-role escape hatch. One deploy-time note: the ledger starts empty, so
+-- at the instant this migration runs every author's window resets — worst case
+-- someone who already posted in the preceding hour gets one extra hour's
+-- allowance, once. Not worth a backfill.
+
+-- ─────────────── content_write_log ───────────────
+-- Deliberately no FK on author_id. The ledger is a two-hour rolling window,
+-- not history: rows age out long before an account-deletion cascade would
+-- matter, and keeping it FK-free means the delete-account Edge Function does
+-- not need to learn about this table.
+create table if not exists public.content_write_log (
+  id         bigint generated always as identity primary key,
+  author_id  uuid not null,
+  kind       text not null,
+  created_at timestamptz not null default now()
+);
+
+-- Covers the only query there is: count by (author, kind) over a recent
+-- window. created_at desc so the window scan starts at the newest row.
+create index if not exists content_write_log_author_kind_created_idx
+  on public.content_write_log (author_id, kind, created_at desc);
+
+alter table public.content_write_log enable row level security;
+
+-- RLS enabled with NO policies: nothing but the definer trigger below ever
+-- touches this table, and a client that could read it would learn how close
+-- another user is to their limit. Supabase's default privileges auto-grant DML
+-- on new objects in public, so strip them explicitly — same belt-and-braces as
+-- feed_events in 0028, so RLS is not the only barrier.
+revoke insert, update, delete, select on public.content_write_log
+  from public, anon, authenticated;
+
+-- ─────────────── the limiter, now reading the ledger ───────────────
+-- Same signature and same tg_argv[0] limit as 0036, so the five existing
+-- rate_limit_* triggers keep working untouched (create or replace preserves
+-- the function OID the triggers point at).
+create or replace function public.enforce_content_rate_limit()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_limit  int  := tg_argv[0]::int;
+  v_author uuid := auth.uid();
+  v_count  int;
+  v_id     bigint;
+begin
+  if v_author is null then
+    -- Definer functions and service-role writes (seeds, moderation) are not
+    -- subject to the limit — unchanged from 0036. They also write no ledger
+    -- row, so seeding cannot spend a real user's quota.
+    return new;
+  end if;
+
+  -- Anything not on the governed list passes through unmetered.
+  if tg_table_name not in ('gigs', 'hangouts', 'voices', 'comments', 'messages') then
+    return new;
+  end if;
+
+  select count(*) into v_count
+    from public.content_write_log
+   where author_id  = v_author
+     and kind       = tg_table_name
+     and created_at > now() - interval '1 hour';
+
+  if v_count >= v_limit then
+    raise exception 'rate limit: too many % in the last hour', tg_table_name
+      using errcode = '54000';
+  end if;
+
+  -- Spend the quota. This runs inside the caller's transaction, so an insert
+  -- that is later rejected (CHECK constraint, another BEFORE trigger, an
+  -- application rollback) takes its ledger row down with it — a failed post
+  -- costs nothing, same as under 0036.
+  insert into public.content_write_log (author_id, kind)
+  values (v_author, tg_table_name)
+  returning id into v_id;
+
+  -- Amortized pruning, in the style of emit_feed_event's sweep in 0028: the
+  -- ledger is a rolling window, not history, so every ~1000th write drops
+  -- everything older than 2× the window. Twice the window, not exactly the
+  -- window, so a long-running transaction's now() can never prune a row the
+  -- limiter still needs to see.
+  if v_id % 1000 = 0 then
+    delete from public.content_write_log
+     where created_at < now() - interval '2 hours';
+  end if;
+
+  return new;
+end;
+$$;
+
+revoke all on function public.enforce_content_rate_limit() from public;
+
+-- ═══════════════ 0040_push_tokens_per_device.sql ═══════════════
+
+-- quad — one push-token row per DEVICE, not per user
+--
+-- 0009 made user_id the PRIMARY KEY of public.user_push_tokens, and
+-- lib/notifications.ts upserts with onConflict: 'user_id'. That silently
+-- assumes one student = one device, which is wrong the moment anyone owns a
+-- phone and an iPad.
+--
+-- Failure scenario: a student installs quad on their iPhone, then on their
+-- iPad. The iPad's registration OVERWRITES the iPhone's row. Every push now
+-- goes to the iPad only; on the phone it reads as "notifications are broken"
+-- with no diagnostic anywhere — no error, no log, nothing the student or we
+-- could see. Worse, signing out on the iPad calls clearPushToken(user_id),
+-- which deletes by user_id and therefore kills BOTH devices until the phone
+-- happens to re-register on its next launch.
+--
+-- Fix: primary key (user_id, expo_push_token) — the row identifies a device
+-- install, not a person. Fan-out already reads user_push_tokens as a list and
+-- batches by 100, so multiple rows per user need no change on the read side.
+--
+-- Rejected alternatives:
+--   * Make expo_push_token the sole primary key ("a device belongs to exactly
+--     one account"). Superficially tidier, but it breaks the client: when a
+--     second student signs in on a shared device, their upsert would have to
+--     UPDATE a row whose user_id is someone else's, and the 0009 RLS policies
+--     are all `user_id = auth.uid()` — the write is denied and that student
+--     silently never registers. The composite key keeps every write inside the
+--     writer's own rows.
+--   * A separate user_devices table with a device_id. More faithful modelling,
+--     but nothing in the app has a stable device identifier to key it on, and
+--     the Expo token is already exactly "this install of this app".
+--
+-- No dedupe step is needed before adding the key: user_id was the PK, so there
+-- is at most one row per user today and the composite key cannot collide.
+--
+-- Do NOT add a separate index on user_id. The composite PK's index leads with
+-- user_id, so every existing lookup (`user_id=eq.…`, `user_id=in.(…)` in the
+-- three push functions, `user_id=eq.…` in delete-account) uses it. A standalone
+-- user_id index would be pure write cost.
+--
+-- RLS is unchanged and stays correct: all four 0009 policies are
+-- `user_id = auth.uid()`, which is a per-row test that does not care how the
+-- table is keyed.
+--
+-- Consequence to be aware of: Expo rotates a token when the app is reinstalled,
+-- so a user who reinstalls leaves a dead row behind instead of overwriting it.
+-- That is what the DeviceNotRegistered receipt handling in the three push
+-- functions is for — it now deletes the one dead row rather than the user's
+-- whole set. `updated_at` is still maintained on every registration if we ever
+-- want a staleness sweep on top.
+--
+-- Client-visible breakage: an upsert with `onConflict: 'user_id'` stops
+-- working the moment this migration lands (PostgREST returns 42P10 — "there is
+-- no unique constraint matching the ON CONFLICT specification"). The matching
+-- client change is in lib/notifications.ts in this same batch; ship the two
+-- together. Old app builds already in someone's hands keep receiving pushes
+-- from their existing row, but stop being able to re-register.
+
+alter table public.user_push_tokens
+  drop constraint if exists user_push_tokens_pkey;
+
+alter table public.user_push_tokens
+  add primary key (user_id, expo_push_token);

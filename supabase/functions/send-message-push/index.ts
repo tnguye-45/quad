@@ -108,10 +108,14 @@ async function pgSelect<T>(path: string): Promise<T[]> {
   return (await res.json()) as T[];
 }
 
-async function pgDeleteToken(userId: string): Promise<void> {
+// Deletes ONE dead device row. Scoped to (user_id, expo_push_token) because
+// since migration 0040 a user may have several rows — deleting by user_id
+// alone would unregister their other, healthy devices on the strength of one
+// DeviceNotRegistered receipt.
+async function pgDeleteToken(userId: string, token: string): Promise<void> {
   const url = `${SUPABASE_URL}/rest/v1/user_push_tokens?user_id=eq.${encodeURIComponent(
     userId,
-  )}`;
+  )}&expo_push_token=eq.${encodeURIComponent(token)}`;
   const res = await fetch(url, {
     method: 'DELETE',
     headers: {
@@ -227,7 +231,9 @@ async function resolveRecipientTokens(
   const allowedIds = userIds.filter((id) => !optedOut.has(id));
   if (allowedIds.length === 0) return [];
 
-  // 3) Their push tokens (one row per user; PK is user_id).
+  // 3) Their push tokens. Since 0040 the PK is (user_id, expo_push_token), so
+  // this legitimately returns several rows for a user with several devices;
+  // each becomes its own recipient entry and gets its own Expo message.
   const allowedList = allowedIds.map(encodeURIComponent).join(',');
   const tokens = await pgSelect<{ user_id: string; expo_push_token: string }>(
     `user_push_tokens?user_id=in.(${allowedList})&select=user_id,expo_push_token`,
@@ -270,8 +276,10 @@ async function sendBatch(
   const payload = (await res.json()) as ExpoTicketResponse;
   const tickets = payload.data ?? [];
 
-  // Each ticket lines up positionally with `messages`. If Expo says a device
-  // isn't registered anymore, drop the stale token so we stop pushing to it.
+  // Each ticket lines up positionally with `messages`, which was mapped 1:1
+  // from `batch` — still true now that one user can occupy several slots (one
+  // per device). If Expo says a device isn't registered anymore, drop that one
+  // stale token so we stop pushing to it.
   for (let i = 0; i < tickets.length; i++) {
     const ticket = tickets[i];
     const recipient = batch[i];
@@ -282,7 +290,7 @@ async function sendBatch(
         `Expo ticket error for user=${recipient.userId}: ${ticket.message} (${code ?? 'no-code'})`,
       );
       if (code === 'DeviceNotRegistered') {
-        await pgDeleteToken(recipient.userId);
+        await pgDeleteToken(recipient.userId, recipient.token);
       }
     }
   }

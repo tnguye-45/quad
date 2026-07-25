@@ -103,8 +103,29 @@ async function pgGetOne<T>(path: string): Promise<T | null> {
   return arr[0] ?? null;
 }
 
-async function pgDeleteToken(userId: string): Promise<void> {
-  const url = `${SUPABASE_URL}/rest/v1/user_push_tokens?user_id=eq.${encodeURIComponent(userId)}`;
+async function pgSelectMany<T>(path: string): Promise<T[]> {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+    headers: {
+      apikey: SERVICE_ROLE_KEY,
+      authorization: `Bearer ${SERVICE_ROLE_KEY}`,
+      accept: 'application/json',
+    },
+  });
+  if (!res.ok) {
+    const txt = await res.text();
+    throw new Error(`pgSelectMany ${path} failed: ${res.status} ${txt}`);
+  }
+  return (await res.json()) as T[];
+}
+
+// Deletes ONE dead device row. Scoped to (user_id, expo_push_token) because
+// since migration 0040 a user may have several rows — deleting by user_id
+// alone would unregister their other, healthy devices on the strength of one
+// DeviceNotRegistered receipt.
+async function pgDeleteToken(userId: string, token: string): Promise<void> {
+  const url = `${SUPABASE_URL}/rest/v1/user_push_tokens?user_id=eq.${encodeURIComponent(
+    userId,
+  )}&expo_push_token=eq.${encodeURIComponent(token)}`;
   const res = await fetch(url, {
     method: 'DELETE',
     headers: {
@@ -153,11 +174,19 @@ async function resolveOwner(
   };
 }
 
-async function getPushToken(userId: string): Promise<string | null> {
-  const row = await pgGetOne<{ expo_push_token: string | null }>(
-    `user_push_tokens?user_id=eq.${encodeURIComponent(userId)}&select=expo_push_token`,
+// Every device the post owner has registered. Since 0040 the PK is
+// (user_id, expo_push_token), so reading just the first row would push to
+// whichever device happens to sort first and leave the others silent — the
+// same one-device-wins bug the migration exists to fix.
+async function getPushTokens(userId: string): Promise<string[]> {
+  const rows = await pgSelectMany<{ expo_push_token: string | null }>(
+    `user_push_tokens?user_id=eq.${encodeURIComponent(
+      userId,
+    )}&select=expo_push_token&order=expo_push_token.asc`,
   );
-  return row?.expo_push_token ?? null;
+  return rows
+    .map((r) => r.expo_push_token)
+    .filter((t): t is string => typeof t === 'string' && t.length > 0);
 }
 
 // True if either user has blocked the other. Used to suppress the comment push
@@ -225,8 +254,11 @@ function payloadFor(
   }
 }
 
-async function sendOne(
-  token: string,
+// One Expo request carrying one message per device. Still a single recipient
+// *person* — the batching is over their devices, which is a handful at most,
+// so no chunking is needed here the way the campus-wide fan-out needs it.
+async function sendToDevices(
+  tokens: string[],
   title: string,
   body: string,
   data: Record<string, unknown>,
@@ -239,7 +271,9 @@ async function sendOne(
       accept: 'application/json',
       'accept-encoding': 'gzip, deflate',
     },
-    body: JSON.stringify([{ to: token, title, body, sound: 'default', data }]),
+    body: JSON.stringify(
+      tokens.map((to) => ({ to, title, body, sound: 'default', data })),
+    ),
   });
 
   if (!res.ok) {
@@ -249,14 +283,21 @@ async function sendOne(
   }
 
   const payload = (await res.json()) as ExpoTicketResponse;
-  const ticket = payload.data?.[0];
-  if (ticket && ticket.status === 'error') {
-    const code = ticket.details?.error;
-    console.warn(
-      `Expo ticket error for user=${recipientUserId}: ${ticket.message} (${code ?? 'no-code'})`,
-    );
-    if (code === 'DeviceNotRegistered') {
-      await pgDeleteToken(recipientUserId);
+  const tickets = payload.data ?? [];
+  // Tickets line up positionally with the messages we sent, so tickets[i]
+  // belongs to tokens[i] — that is the token to prune on DeviceNotRegistered.
+  for (let i = 0; i < tickets.length; i++) {
+    const ticket = tickets[i];
+    const token = tokens[i];
+    if (!ticket || !token) continue;
+    if (ticket.status === 'error') {
+      const code = ticket.details?.error;
+      console.warn(
+        `Expo ticket error for user=${recipientUserId}: ${ticket.message} (${code ?? 'no-code'})`,
+      );
+      if (code === 'DeviceNotRegistered') {
+        await pgDeleteToken(recipientUserId, token);
+      }
     }
   }
 }
@@ -303,8 +344,8 @@ Deno.serve(async (req: Request) => {
       return json(200, { skipped: true, reason: 'blocked' });
     }
 
-    const token = await getPushToken(owner.ownerId);
-    if (!token) {
+    const tokens = await getPushTokens(owner.ownerId);
+    if (tokens.length === 0) {
       return json(200, { skipped: true, reason: 'owner has no push token' });
     }
 
@@ -317,8 +358,8 @@ Deno.serve(async (req: Request) => {
     );
     const data = payloadFor(record.target_type, record.target_id, record.id);
 
-    await sendOne(token, title, body, data, owner.ownerId);
-    return json(200, { sent: 1, owner: owner.ownerId });
+    await sendToDevices(tokens, title, body, data, owner.ownerId);
+    return json(200, { sent: tokens.length, owner: owner.ownerId });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error('send-new-comment-push failed:', message);

@@ -21,6 +21,19 @@ import { clearPushToken } from '@/lib/notifications';
 
 const CONFIRM_WORD = 'DELETE';
 
+// delete-account does a paginated storage sweep (up to 200 list+delete
+// round-trips per bucket, across two buckets) before it answers, so it is
+// legitimately slow — but without a deadline a dropped connection leaves the
+// promise pending forever, the button stuck on "Deleting…", and force-quitting
+// the app the only way out.
+const DELETE_TIMEOUT_MS = 60_000;
+
+// Deliberately NOT worded as a failure: the request may well have completed
+// server-side, and delete-account's own note is that the auth delete revokes
+// the caller's JWT, so the user cannot simply retry to find out.
+const TIMEOUT_MESSAGE =
+  'This is taking longer than expected, and we lost track of the request. It may still have gone through. Close quad, reopen it, and check whether you are still signed in — if you are, the account is still there and you can try again.';
+
 export default function AccountSettingsScreen() {
   const c = Colors[useColorScheme() ?? 'light'];
   const { session, signOut, isDev } = useAuth();
@@ -39,6 +52,18 @@ export default function AccountSettingsScreen() {
     const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
     if (!supabaseUrl) return { ok: false, error: 'missing EXPO_PUBLIC_SUPABASE_URL' };
 
+    // AbortController + our own timer rather than AbortSignal.timeout():
+    // React Native polyfills AbortSignal with abort-controller@3, which has no
+    // `timeout` static, so calling it would throw a TypeError before the
+    // request was ever made. The flag also lets us tell a timeout apart from a
+    // genuine network error in the catch below.
+    const controller = new AbortController();
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, DELETE_TIMEOUT_MS);
+
     try {
       // Best-effort: clear our push token row before nuking the user so the
       // Edge Function doesn't race the client. Tolerate failure — the function
@@ -51,6 +76,7 @@ export default function AccountSettingsScreen() {
           authorization: `Bearer ${session.access_token}`,
           'content-type': 'application/json',
         },
+        signal: controller.signal,
       });
       if (!res.ok) {
         let body = '';
@@ -63,7 +89,10 @@ export default function AccountSettingsScreen() {
       }
       return { ok: true };
     } catch (e) {
+      if (timedOut) return { ok: false, error: TIMEOUT_MESSAGE };
       return { ok: false, error: e instanceof Error ? e.message : String(e) };
+    } finally {
+      clearTimeout(timer);
     }
   }
 

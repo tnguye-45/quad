@@ -1,7 +1,12 @@
 # Supabase setup — finish-up checklist
 
-The code side is done. These four steps are the only remaining work, and they all
-require a logged-in Supabase dashboard so they can't be automated. Each link
+> **This checklist only gets you to a working SIGN-IN.** Push notifications,
+> image upload and in-app account deletion each need a further step that is not
+> listed here, and every one of them fails *silently* when skipped. See
+> [`LAUNCH_RUNBOOK.md`](../LAUNCH_RUNBOOK.md) for the full ordered sequence
+> before you launch to real students.
+
+These steps require a logged-in Supabase dashboard so they can't be automated. Each link
 goes straight to the right page in your `anoosbiuaggassednkzt` project.
 
 Project ref: `anoosbiuaggassednkzt`
@@ -39,11 +44,21 @@ Open: <https://supabase.com/dashboard/project/anoosbiuaggassednkzt/sql/new>
 Open `supabase/migrations/_bundle.sql` in your editor, **select all → copy**,
 paste into the SQL Editor, click **Run**. It bundles every migration in order
 (see the header of `_bundle.sql` for the current range — regenerate it with
-`node supabase/scripts/generate-bundle.mjs` after adding a migration), is
-idempotent (safe to re-run), and should finish with
-"Success. No rows returned."
+`node supabase/scripts/generate-bundle.mjs` after adding a migration) and should
+finish with "Success. No rows returned."
 
-Re-run `npm run verify-supabase` — all 10 tables should now report PASS.
+**It is not idempotent** — this file used to claim it was. `0001_schema.sql` starts
+with `create table public.profiles (…)` and no `if not exists`, and the SQL editor
+runs a paste as one transaction, so against a project that already has tables the
+whole paste aborts on the first statement. Pasting the bundle is a **fresh-project**
+operation. If the project is partially migrated, apply the missing files
+individually in number order — `LAUNCH_RUNBOOK.md` §1 has the probes for working out
+where a live project actually stands.
+
+Re-run `npm run verify-supabase` — every table and view should report PASS.
+
+**Regenerate the bundle first** (`node supabase/scripts/generate-bundle.mjs`) —
+it is generated, and it goes stale the moment anyone adds a migration.
 
 ## 4. Configure auth
 

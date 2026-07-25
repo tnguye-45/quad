@@ -217,16 +217,16 @@ function CommentRow({
               </ThemedText>
             </Pressable>
           ) : (
-            // The reports table has no `comment` kind, so a reported comment is
-            // filed against its parent post with the comment author attached —
-            // the moderator sees which thread and which user.
+            // Report the comment itself: the server (0033) resolves the
+            // offending user from the comment's author, so the moderation row
+            // points at the commenter — not the parent post's owner.
             <Pressable
               onPress={() =>
                 router.push({
                   pathname: '/report',
                   params: {
-                    type: targetType,
-                    id: targetId,
+                    type: 'comment',
+                    id: comment.id,
                     ...(comment.authorId ? { userId: comment.authorId } : {}),
                   },
                 })

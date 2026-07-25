@@ -1,5 +1,5 @@
 import { router } from "expo-router";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
     FlatList,
     Pressable,
@@ -41,6 +41,36 @@ export default function HangoutsScreen() {
     hasMore,
   } = usePosts();
   const [refreshing, setRefreshing] = useState(false);
+  // Feedback for the card's quick-RSVP button — a full/blocked hangout used
+  // to fail with no signal at all on this screen.
+  const [rsvpNotice, setRsvpNotice] = useState<string | null>(null);
+  const noticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current);
+    },
+    [],
+  );
+
+  async function onQuickJoin(id: string) {
+    const res = await rsvpHangout(id);
+    const notice =
+      res.status === "full"
+        ? "That hangout is full."
+        : res.status === "blocked"
+          ? "You can't join that hangout."
+          : res.status === "not_found"
+            ? "That hangout no longer exists."
+            : res.status === "error"
+              ? "Couldn't RSVP — check your connection."
+              : null;
+    if (notice) {
+      setRsvpNotice(notice);
+      if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current);
+      noticeTimerRef.current = setTimeout(() => setRsvpNotice(null), 4000);
+    }
+  }
+
   const showLoading = !hydrated && loading && hangouts.length === 0;
   // Don't invite them to "start a hangout" when the feed merely failed to load —
   // the retry row above is already saying the opposite.
@@ -94,27 +124,39 @@ export default function HangoutsScreen() {
             hangout={item}
             c={c}
             joined={!!myRsvps[item.id]}
-            onJoin={() => rsvpHangout(item.id)}
+            onJoin={() => void onQuickJoin(item.id)}
           />
         )}
         ListHeaderComponent={
-          error && !showLoading ? (
-            <Pressable
-              onPress={refresh}
-              accessibilityRole="button"
-              style={({ pressed }) => [
-                styles.retryRow,
-                { borderColor: c.border, opacity: pressed ? 0.6 : 1 },
-              ]}
-            >
-              <ThemedText
-                style={[styles.retryText, { color: c.danger }]}
-                type="mono"
+          <>
+            {rsvpNotice ? (
+              <View style={[styles.retryRow, { borderColor: c.border }]}>
+                <ThemedText
+                  style={[styles.retryText, { color: c.danger }]}
+                  type="mono"
+                >
+                  {rsvpNotice}
+                </ThemedText>
+              </View>
+            ) : null}
+            {error && !showLoading ? (
+              <Pressable
+                onPress={refresh}
+                accessibilityRole="button"
+                style={({ pressed }) => [
+                  styles.retryRow,
+                  { borderColor: c.border, opacity: pressed ? 0.6 : 1 },
+                ]}
               >
-                Couldn&apos;t load hangouts. Tap to retry.
-              </ThemedText>
-            </Pressable>
-          ) : null
+                <ThemedText
+                  style={[styles.retryText, { color: c.danger }]}
+                  type="mono"
+                >
+                  Couldn&apos;t load hangouts. Tap to retry.
+                </ThemedText>
+              </Pressable>
+            ) : null}
+          </>
         }
         ListEmptyComponent={
           showLoading ? (

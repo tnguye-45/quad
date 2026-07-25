@@ -96,6 +96,15 @@ try {
 // Each table should exist and be queryable (anon should be able to issue SELECT
 // against the table even if RLS filters all rows out — a non-existent table
 // returns a different error than RLS does).
+//
+// The probe is `select('*').limit(0)` — NOT `select('*', { head: true })`. A HEAD
+// response carries no body, so PostgREST's error JSON never arrives and
+// supabase-js hands back `error: null` for a table that does not exist. This
+// script reported "✓ All 23 checks passed. Supabase backend is live." against a
+// database missing feed_events and all four 0027 feed views — i.e. against a
+// database where every feed in the app is empty. `limit(0)` transfers no rows
+// either, but a GET returns the body, so PGRST205 / 42P01 come through.
+// checkProbeIsSound() below fails the run if that ever regresses.
 const expectedTables = [
   'profiles',
   'gigs',
@@ -107,26 +116,61 @@ const expectedTables = [
   'reports',
   'voices',
   'voice_votes',
+  // 0009–0028 additions — without these the script used to report PASS
+  // against a DB that the client can't actually run on.
+  'user_push_tokens',
+  'user_blocks',
+  'notification_prefs',
+  'comments',
+  'feed_events',
+  // 0027 feed views — the ONLY read path the client uses for content. A DB
+  // missing these renders every feed empty even though the tables exist.
+  'gigs_feed',
+  'hangouts_feed',
+  'voices_feed',
+  'comments_feed',
 ];
 
+// 42P01 = undefined_table, PGRST205 = schema cache miss. Either means the
+// migration that creates this relation has not been applied.
+const isMissingRelation = (error) =>
+  error?.code === 'PGRST205' ||
+  error?.code === '42P01' ||
+  /(does not exist|PGRST205|schema cache|Could not find the table)/i.test(error?.message ?? '');
+
+const probeRelation = (name) => supabase.from(name).select('*').limit(0);
+
+// Self-check: a table that cannot exist must come back missing. If this ever
+// passes, the probe has stopped distinguishing present from absent and every
+// PASS below is meaningless — so refuse to report anything rather than print a
+// screen of green. This is the exact failure the head:true probe had.
+const { error: sentinelError } = await probeRelation('quad_verify_sentinel_does_not_exist');
+if (isNetworkError(sentinelError?.message ?? '')) {
+  fail('probe is sound', `unreachable (${sentinelError.message}) — check network/URL`);
+} else if (!isMissingRelation(sentinelError)) {
+  fail(
+    'probe is sound',
+    'a nonexistent table reported as PRESENT — the existence check is broken, ' +
+      'every table result below would be a false PASS',
+  );
+  console.log('');
+  console.log('✗ Aborting: cannot verify anything with a probe that detects nothing.\n');
+  process.exit(1);
+} else {
+  pass('probe is sound', 'a nonexistent table is correctly reported missing');
+}
+
 for (const table of expectedTables) {
-  const { error } = await supabase.from(table).select('*', { count: 'exact', head: true });
+  const { error } = await probeRelation(table);
   if (error) {
     if (isNetworkError(error.message)) {
       // Never reached the server — can't conclude anything about the table.
       fail(`table public.${table} exists`, `unreachable (${error.message}) — check network/URL`);
+    } else if (isMissingRelation(error)) {
+      fail(`table public.${table} exists`, 'migration not applied — see LAUNCH_RUNBOOK.md §1');
     } else {
-      // 42P01 = undefined_table, PGRST205 = schema cache miss. Either means
-      // migrations haven't run.
-      const missing = /(does not exist|PGRST205|schema cache|Could not find the table)/i.test(
-        error.message,
-      );
-      if (missing) {
-        fail(`table public.${table} exists`, 'run supabase/migrations/_bundle.sql in SQL Editor');
-      } else {
-        // Other errors (e.g. permission denied) still mean the table exists.
-        pass(`table public.${table} exists`, 'RLS enforced');
-      }
+      // Other errors (e.g. permission denied) still mean the table exists.
+      pass(`table public.${table} exists`, 'RLS enforced');
     }
   } else {
     pass(`table public.${table} exists`);

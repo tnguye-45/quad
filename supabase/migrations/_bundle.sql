@@ -1,7 +1,7 @@
 -- ═══════════════════════════════════════════════════════════════════════════
 -- quad — GENERATED migration bundle. DO NOT EDIT BY HAND.
 -- Regenerate with: node supabase/scripts/generate-bundle.mjs
--- Contains, in order: 0001, 0002, 0003, 0004, 0005, 0006, 0007, 0008, 0009, 0010, 0011, 0012, 0013, 0014, 0015, 0016, 0017, 0018, 0019, 0020, 0021, 0022, 0023, 0024, 0025, 0026, 0027, 0028, 0029, 0030, 0031, 0032
+-- Contains, in order: 0001, 0002, 0003, 0004, 0005, 0006, 0007, 0008, 0009, 0010, 0011, 0012, 0013, 0014, 0015, 0016, 0017, 0018, 0019, 0020, 0021, 0022, 0023, 0024, 0025, 0026, 0027, 0028, 0029, 0030, 0031, 0032, 0033, 0034, 0035, 0036, 0037, 0038, 0039, 0040
 -- ═══════════════════════════════════════════════════════════════════════════
 
 -- ═══════════════ 0001_schema.sql ═══════════════
@@ -2684,3 +2684,790 @@ alter table public.hangouts
 alter table public.hangouts
   add constraint hangouts_description_len
   check (description is null or char_length(description) <= 2000) not valid;
+
+-- ═══════════════ 0033_membership_lock_and_comment_reports.sql ═══════════════
+
+-- quad — lock conversation membership rewrites (fixes C1) + report comments
+-- (fixes H4)
+--
+-- C1: the "conversation_members: update own" policy (0002) only pins
+-- user_id = auth.uid() in USING/WITH CHECK; it never pins conversation_id.
+-- Row-level policies cannot restrict WHICH COLUMNS change, so a member could
+-- PATCH their own row's conversation_id to any other thread's uuid — USING
+-- matches their old row, WITH CHECK still sees user_id = me, so it passes —
+-- and thereby read (and, post-0029, send into) a conversation they were never
+-- invited to. This re-opened via UPDATE the membership-forgery hole 0023 shut
+-- for INSERT. Fix at the privilege layer instead of the policy layer: a
+-- column-level UPDATE grant makes last_read_at the ONLY updatable column, so
+-- the PK columns can no longer be rewritten by anyone. The row-scoping policy
+-- from 0002 still applies on top.
+revoke update on public.conversation_members from authenticated;
+grant update (last_read_at) on public.conversation_members to authenticated;
+
+-- H4: reports had no `comment` target kind, so the client filed a reported
+-- comment against its PARENT POST and attached the comment author as
+-- target_user_id — which 0030's trigger then OVERWRITES with the parent post's
+-- author ("never trust the client"). Net effect: reporting a harassing comment
+-- pinned the report on the innocent post owner and recorded nothing about which
+-- comment was reported. Add a first-class `comment` kind resolved server-side.
+alter type public.report_target_kind add value if not exists 'comment';
+
+-- Re-create the resolver with a comments branch. Body otherwise identical to
+-- 0030 (rate limit + server-authoritative target_user_id).
+create or replace function public.reports_resolve_target()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_author uuid;
+begin
+  if (select count(*) from public.reports
+       where reporter_id = new.reporter_id
+         and created_at > now() - interval '1 hour') >= 20 then
+    raise exception 'too many reports; please try again later'
+      using errcode = '54000';
+  end if;
+
+  if new.target_kind = 'gig' then
+    select poster_id into v_author from public.gigs     where id = new.target_id;
+  elsif new.target_kind = 'hangout' then
+    select host_id   into v_author from public.hangouts where id = new.target_id;
+  elsif new.target_kind = 'voice' then
+    select author_id into v_author from public.voices   where id = new.target_id;
+  elsif new.target_kind = 'comment' then
+    select author_id into v_author from public.comments where id = new.target_id;
+  elsif new.target_kind = 'message' then
+    select sender_id into v_author from public.messages where id = new.target_id;
+  elsif new.target_kind = 'profile' then
+    select id        into v_author from public.profiles where id = new.target_id;
+  end if;
+
+  if v_author is null then
+    raise exception 'report target not found' using errcode = 'P0002';
+  end if;
+
+  -- Never trust the client's value.
+  new.target_user_id := v_author;
+  return new;
+end;
+$$;
+
+revoke all on function public.reports_resolve_target() from public;
+
+-- ═══════════════ 0034_anon_dm_lockdown_read_rpc_profile_limits.sql ═══════════════
+
+-- quad — server-enforce "no DMing anonymous gig posters" (H1), server-clock
+-- read receipts (M3), and profile length limits (M8).
+--
+-- H1: the feed masks an anonymous gig's poster_id (0027), but any authenticated
+-- user could still call start_gig_conversation(anon_gig) — which seeds the
+-- poster as a readable conversation_members row — and join it to profiles to
+-- recover the poster's real identity: a one-RPC, no-consent mass de-anonymizer.
+-- The CLIENT already forbids messaging anonymous posters (app/gig/[id].tsx:
+-- `canMessage = !isOwn && !gig.anonymous && …`); this makes the server enforce
+-- the same rule instead of trusting the UI. (Anonymous hangouts still form a
+-- group chat with the host — attendees are meeting them in person — so the
+-- client masks the host's identity in that chat rather than blocking the join.)
+create or replace function public.start_gig_conversation(p_gig_id uuid)
+returns uuid
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_me        uuid := auth.uid();
+  v_poster    uuid;
+  v_anon      boolean;
+  v_conv_id   uuid;
+begin
+  if v_me is null then
+    raise exception 'not authenticated' using errcode = '28000';
+  end if;
+
+  select poster_id, anonymous into v_poster, v_anon
+    from public.gigs where id = p_gig_id;
+  if v_poster is null then
+    raise exception 'gig not found' using errcode = 'P0002';
+  end if;
+
+  if v_poster = v_me then
+    raise exception 'cannot message yourself' using errcode = '22023';
+  end if;
+
+  -- Anonymous posters are unreachable by DM — messaging them would leak the
+  -- identity the anonymous flag exists to protect.
+  if v_anon then
+    raise exception 'this poster cannot be messaged' using errcode = '42501';
+  end if;
+
+  -- Either side of a block relationship kills the thread before it starts.
+  if public.is_blocked(v_poster) then
+    raise exception 'you cannot message this user' using errcode = '42501';
+  end if;
+
+  -- Reuse an existing 1:1 thread between exactly these two for this gig.
+  select c.id into v_conv_id
+    from public.conversations c
+    join public.conversation_members m1 on m1.conversation_id = c.id and m1.user_id = v_me
+    join public.conversation_members m2 on m2.conversation_id = c.id and m2.user_id = v_poster
+   where c.gig_id = p_gig_id
+   limit 1;
+
+  if v_conv_id is null then
+    insert into public.conversations (gig_id) values (p_gig_id)
+      returning id into v_conv_id;
+    insert into public.conversation_members (conversation_id, user_id)
+      values (v_conv_id, v_me), (v_conv_id, v_poster)
+      on conflict do nothing;
+  else
+    -- Defensive: heal a half-membered conversation (shouldn't happen).
+    insert into public.conversation_members (conversation_id, user_id)
+      values (v_conv_id, v_me), (v_conv_id, v_poster)
+      on conflict do nothing;
+  end if;
+
+  return v_conv_id;
+end;
+$$;
+
+revoke all on function public.start_gig_conversation(uuid) from public;
+grant execute on function public.start_gig_conversation(uuid) to authenticated;
+
+-- M3: mark-as-read used the CLIENT clock (new Date().toISOString()) written to
+-- last_read_at, then compared against server-generated sent_at. A device clock
+-- skewed slow leaves a thread stuck "unread" forever; skewed fast marks unseen
+-- messages read. Stamp last_read_at with the SERVER clock via a definer RPC so
+-- it's always on the same timeline as sent_at. (Definer also sidesteps the
+-- column-level UPDATE grant from 0033 — though it only writes last_read_at.)
+create or replace function public.mark_conversation_read(p_conversation_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  update public.conversation_members
+     set last_read_at = now()
+   where conversation_id = p_conversation_id
+     and user_id = auth.uid();
+end;
+$$;
+
+revoke all on function public.mark_conversation_read(uuid) from public;
+grant execute on function public.mark_conversation_read(uuid) to authenticated;
+
+-- M8: profiles shipped with unbounded text columns (only bio was capped, and
+-- only client-side). display_name is joined into every feed/comment/message
+-- row via the 0027 views, so a 1 MB name is a feed-wide DoS — the same class
+-- 0032 fixed for gigs/hangouts. Mirror those limits here, and cap the links
+-- array so it can't grow without bound. NOT VALID binds new/updated rows
+-- immediately while skipping a scan of existing rows (see 0032 for the
+-- validate-after-deploy step).
+alter table public.profiles
+  add constraint profiles_display_name_len
+  check (display_name is null or char_length(display_name) <= 60) not valid;
+
+alter table public.profiles
+  add constraint profiles_initials_len
+  check (initials is null or char_length(initials) <= 8) not valid;
+
+alter table public.profiles
+  add constraint profiles_major_len
+  check (major is null or char_length(major) <= 80) not valid;
+
+alter table public.profiles
+  add constraint profiles_dorm_len
+  check (dorm is null or char_length(dorm) <= 80) not valid;
+
+alter table public.profiles
+  add constraint profiles_bio_len
+  check (bio is null or char_length(bio) <= 240) not valid;
+
+alter table public.profiles
+  add constraint profiles_links_count
+  check (jsonb_array_length(links) <= 10) not valid;
+
+-- ═══════════════ 0035_reports_read_lockdown.sql ═══════════════
+
+-- quad — reports: close the de-anonymization oracle (read-own leaked the
+-- server-resolved author id)
+--
+-- 0030/0033's resolver trigger runs SECURITY DEFINER and stamps the REAL
+-- author id into reports.target_user_id — including for anonymous voices,
+-- gigs, hangouts, and comments. 0014's "reports: read own" SELECT policy then
+-- let the reporter read their own row back. Net effect: report any anonymous
+-- post → select your own report → target_user_id is the anonymous author's
+-- uid → the public profiles directory turns that into a name. At the 20/hr
+-- report rate limit that's ~480 de-anonymizations per day per account, which
+-- defeats the entire 0027 masking architecture.
+--
+-- The client never SELECTs reports: app/report.tsx only inserts (with the
+-- default return=minimal), and "already reported" rides the 23505 unique
+-- violation from 0030's dedupe index, not a read-back. The moderator queue
+-- uses the service role, which none of this touches. So the client read path
+-- can simply cease to exist — fail closed.
+
+drop policy if exists "reports: read own" on public.reports;
+
+-- Belt and suspenders: even if a future migration adds a SELECT policy, the
+-- table-level grant is gone until someone deliberately re-grants columns
+-- (and they should exclude target_user_id when they do).
+revoke select on public.reports from authenticated, anon;
+
+-- ═══════════════ 0036_content_rate_limits.sql ═══════════════
+
+-- quad — per-author insert rate limits on content tables
+--
+-- Until now the only rate limit anywhere was reports (0030, 20/hr). Every
+-- gig/hangout insert fires notify_new_post → a push to EVERY registered
+-- device, with the (attacker-controlled) title as the body. With the anon key
+-- public by design, one hostile student with a script could blast the whole
+-- campus and flood every feed — a week-one trust killer at a school this
+-- small. 0032/0033 capped row SIZE; nothing capped row COUNT.
+--
+-- One BEFORE INSERT trigger, shared across the five content tables, counting
+-- the caller's own rows in the last hour. SECURITY DEFINER because the
+-- authenticated role can no longer SELECT the author columns on these tables
+-- (0027 column lockdown), so an invoker-rights count would itself be denied.
+-- Errcode 54000 to match the reports limiter — clients already map it.
+--
+-- Limits (per author, per rolling hour) — generous multiples of any honest
+-- usage at launch scale:
+--   gigs 5 · hangouts 5 · voices 10 · comments 60 · messages 120
+
+create or replace function public.enforce_content_rate_limit()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_limit int := tg_argv[0]::int;
+  v_count int;
+begin
+  if auth.uid() is null then
+    -- Definer functions and service-role writes (seeds, moderation) are not
+    -- subject to the limit.
+    return new;
+  end if;
+
+  if tg_table_name = 'gigs' then
+    select count(*) into v_count from public.gigs
+      where poster_id = auth.uid() and posted_at > now() - interval '1 hour';
+  elsif tg_table_name = 'hangouts' then
+    select count(*) into v_count from public.hangouts
+      where host_id = auth.uid() and created_at > now() - interval '1 hour';
+  elsif tg_table_name = 'voices' then
+    select count(*) into v_count from public.voices
+      where author_id = auth.uid() and posted_at > now() - interval '1 hour';
+  elsif tg_table_name = 'comments' then
+    select count(*) into v_count from public.comments
+      where author_id = auth.uid() and created_at > now() - interval '1 hour';
+  elsif tg_table_name = 'messages' then
+    select count(*) into v_count from public.messages
+      where sender_id = auth.uid() and sent_at > now() - interval '1 hour';
+  else
+    return new;
+  end if;
+
+  if v_count >= v_limit then
+    raise exception 'rate limit: too many % in the last hour', tg_table_name
+      using errcode = '54000';
+  end if;
+
+  return new;
+end;
+$$;
+
+revoke all on function public.enforce_content_rate_limit() from public;
+
+drop trigger if exists rate_limit_gigs on public.gigs;
+create trigger rate_limit_gigs
+  before insert on public.gigs
+  for each row execute function public.enforce_content_rate_limit('5');
+
+drop trigger if exists rate_limit_hangouts on public.hangouts;
+create trigger rate_limit_hangouts
+  before insert on public.hangouts
+  for each row execute function public.enforce_content_rate_limit('5');
+
+drop trigger if exists rate_limit_voices on public.voices;
+create trigger rate_limit_voices
+  before insert on public.voices
+  for each row execute function public.enforce_content_rate_limit('10');
+
+drop trigger if exists rate_limit_comments on public.comments;
+create trigger rate_limit_comments
+  before insert on public.comments
+  for each row execute function public.enforce_content_rate_limit('60');
+
+drop trigger if exists rate_limit_messages on public.messages;
+create trigger rate_limit_messages
+  before insert on public.messages
+  for each row execute function public.enforce_content_rate_limit('120');
+
+-- ═══════════════ 0037_message_images_anon_path.sql ═══════════════
+
+-- quad — message-images: stop leaking the uploader's uid in the object path
+--
+-- 0017's path convention was `{userId}/{stamp}-{rand}.jpg`, and the public
+-- URL is stored verbatim in messages.image_url — readable by every member of
+-- the conversation. For an ANONYMOUS hangout host that meant any group member
+-- could read the host's real uid out of an image URL and resolve it against
+-- the public profiles directory: a de-anonymization path the 0027/0034 work
+-- didn't cover.
+--
+-- New convention (client change ships with this migration):
+--   `{conversationId}/{stamp}-{rand}.jpg`
+-- The conversation id is shared knowledge among members and identifies no
+-- one. Upload rights change from "own folder" to "a conversation I belong
+-- to", via the same is_conversation_member() helper the messages RLS uses.
+--
+-- Kept as-is, deliberately:
+--   * public read (URLs are unguessable; a private bucket + signed URLs is a
+--     larger change tracked for later),
+--   * the owner-folder UPDATE/DELETE policies — they still govern legacy
+--     `{uid}/...` objects and simply never match the new paths (messages are
+--     immutable in v1; deletion happens via the delete-account function's
+--     service role, which RLS doesn't bind).
+--   * delete-account must now ALSO remove objects referenced by the user's
+--     messages.image_url, not just the `{uid}/` prefix — shipped in the same
+--     commit (supabase/functions/delete-account).
+
+drop policy if exists "message-images: owner insert" on storage.objects;
+create policy "message-images: member insert"
+  on storage.objects for insert
+  to authenticated
+  with check (
+    bucket_id = 'message-images'
+    -- Non-uuid first segments fail the cast loudly (fail closed).
+    and public.is_conversation_member(((storage.foldername(name))[1])::uuid)
+  );
+
+-- ═══════════════ 0038_anonymous_hangout_chat_lockdown.sql ═══════════════
+
+-- quad — anonymous hangouts lose the group chat (closes the last de-anonymization
+-- path), plus two hangout-join defects the same function has to fix.
+--
+-- ─────────────── 1) the hole ───────────────
+--
+-- 0027 masks host_id in hangouts_feed, 0034 refuses DMs to anonymous gig posters,
+-- 0037 took the uploader's uid out of message-image paths. conversation_members was
+-- never brought under any of it. Its SELECT policy (0002) is
+--
+--   using (user_id = auth.uid() or public.is_conversation_member(conversation_id))
+--
+-- and profiles is `using (true)` for every authenticated user. So any member of a
+-- hangout's group chat can read every other member's real uid and resolve it to a
+-- name — including the host who chose to be anonymous.
+--
+-- This is not a theoretical read. The shipping UI does it: app/connections.tsx
+-- (the "Obsidian map") builds its ego graph from conversation_members of the
+-- caller's own conversations, so an anonymous host lands on their attendee's map as
+-- a ring-1 node labelled "hung out", captioned with display name, major, dorm and
+-- bio. lib/messaging.ts's hydrateOtherReads puts the same uid in otherReads[0], and
+-- app/chat/[id].tsx hands it straight to the block/report menu — while the chat
+-- header dutifully renders "Anonymous". Alice hosts anonymously, Bob RSVPs, the
+-- group chat has exactly two members, and the other member is the host. With the
+-- anon key (public by design) it is one query, no UI required.
+--
+-- Same class as the hole 0034 called "a one-RPC, no-consent mass de-anonymizer",
+-- reached through hangouts instead of gigs.
+--
+-- ─────────────── 2) the fix, and the two designs rejected ───────────────
+--
+-- CHOSEN: mirror 0034's rule. An anonymous hangout does not get a group conversation
+-- at all. RSVP still works — the attendee row is still inserted, capacity is still
+-- enforced, hangouts_feed.going_count still increments — but join_hangout returns
+-- NULL for the conversation id and creates no membership row. The identity never
+-- enters a readable table, so there is nothing to mask.
+--
+-- REJECTED — masking conversation_members behind a definer view. Column-level
+-- revoke cannot work here: the client legitimately filters on user_id = auth.uid()
+-- to read its own last_read_at and to delete its own membership row on block/leave,
+-- and Postgres requires SELECT privilege on any column named in a WHERE clause. The
+-- alternative — tightening the RLS policy to own-rows-only and serving partners
+-- through a view — drops other members' UPDATE events out of the supabase_realtime
+-- publication, which silently kills read receipts for EVERY conversation, not just
+-- anonymous ones. Trading a working feature for every user against a leak affecting
+-- one is the wrong trade.
+--
+-- REJECTED — removing the anonymous option from hangouts entirely. Bigger product
+-- change than the defect requires, and it throws away a legitimate use (posting a
+-- hangout you'd rather not have your name on in the feed).
+--
+-- THE COST, stated plainly: attendees of an anonymous hangout have no group chat to
+-- coordinate in. That is a real feature loss and it is the price of the anonymity
+-- promise. If that trade is later judged wrong, the honest move is to drop the
+-- anonymous flag for hangouts — NOT to reinstate the chat and re-open this hole.
+--
+-- ─────────────── 3) pre-existing data ───────────────
+--
+-- Conversations tied to anonymous hangouts may already exist. This migration does
+-- NOT delete them: writing destructive DDL against rows nobody has inspected is how
+-- you lose real chat history to a security patch. They must be reviewed by hand:
+--
+--   select c.id, c.hangout_id, count(m.user_id) as members
+--     from public.conversations c
+--     join public.hangouts h on h.id = c.hangout_id and h.anonymous
+--     left join public.conversation_members m on m.conversation_id = c.id
+--    group by c.id, c.hangout_id;
+--
+-- Anything that returns is a live leak — delete those conversations deliberately,
+-- after confirming what they contain. The client ships defense-in-depth for legacy
+-- rows in the same commit (lib/connections.ts drops anonymous-hangout groups from
+-- the orbit graph; app/chat/[id].tsx withholds a masked partner's uid from the
+-- block/report menu), so the app cannot surface them even before the cleanup runs.
+--
+-- ─────────────── 4) client-visible breakage (intentional) ───────────────
+--
+--   * join_hangout returns NULL for an anonymous hangout. A null conversation id is
+--     now a SUCCESS value, not a failure — callers that treated it as "couldn't join
+--     the group chat" must stop. Fixed in app/hangout/[id].tsx in this commit.
+--   * hangout_attendees can no longer be deleted directly (see §7); leave_hangout is
+--     the only path.
+
+-- ─────────────── 5) join_hangout ───────────────
+-- Body carries three changes over 0029: the anonymous short-circuit above, the
+-- existing-attendee capacity exemption below, and hoisting the attendee insert above
+-- the conversation work so the anonymous path still RSVPs.
+create or replace function public.join_hangout(p_hangout_id uuid)
+returns uuid
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_me       uuid := auth.uid();
+  v_host     uuid;
+  v_max      int;
+  v_anon     boolean;
+  v_count    int;
+  v_already  boolean;
+  v_conv_id  uuid;
+begin
+  if v_me is null then
+    raise exception 'not authenticated' using errcode = '28000';
+  end if;
+
+  select host_id, max_people, anonymous
+    into v_host, v_max, v_anon
+    from public.hangouts where id = p_hangout_id;
+  if v_host is null then
+    raise exception 'hangout not found' using errcode = 'P0002';
+  end if;
+
+  if v_me <> v_host and public.is_blocked(v_host) then
+    raise exception 'you cannot join this hangout' using errcode = '42501';
+  end if;
+
+  v_already := exists (
+    select 1 from public.hangout_attendees
+     where hangout_id = p_hangout_id and user_id = v_me
+  );
+
+  -- Capacity. The host is always in their own hangout, and an attendee who is
+  -- ALREADY in must not be turned away from it — they re-enter this function every
+  -- time the app needs the conversation id after a cold start. 0029 checked capacity
+  -- unconditionally and raised 23514 before ever reaching the idempotent insert, so
+  -- the moment a hangout filled up its existing attendees were permanently locked
+  -- out of their own group chat with "Couldn't open the group chat. Try again." —
+  -- and retrying never helped. The 0025 BEFORE INSERT trigger already exempts
+  -- existing attendees for exactly this reason; this check was pre-empting it.
+  if v_me <> v_host and not v_already then
+    select count(*) into v_count
+      from public.hangout_attendees where hangout_id = p_hangout_id;
+    if v_count >= v_max then
+      raise exception 'hangout is full' using errcode = '23514';
+    end if;
+  end if;
+
+  -- RSVP (idempotent). Runs for anonymous hangouts too — the attendee list and the
+  -- going_count are not the leak; the readable membership row is.
+  insert into public.hangout_attendees (hangout_id, user_id)
+    values (p_hangout_id, v_me)
+    on conflict do nothing;
+
+  -- Anonymous host: stop here. No conversation, no membership row, no uid for a
+  -- co-member to read back. See the header for why masking was not the answer.
+  if v_anon then
+    return null;
+  end if;
+
+  select id into v_conv_id from public.conversations
+    where hangout_id = p_hangout_id limit 1;
+
+  if v_conv_id is null then
+    insert into public.conversations (hangout_id) values (p_hangout_id)
+      returning id into v_conv_id;
+    -- Seed with every existing attendee plus the host; on conflict keeps it idempotent.
+    insert into public.conversation_members (conversation_id, user_id)
+    select v_conv_id, a.user_id from public.hangout_attendees a
+      where a.hangout_id = p_hangout_id
+    union
+    select v_conv_id, v_host
+    on conflict do nothing;
+  else
+    insert into public.conversation_members (conversation_id, user_id)
+      values (v_conv_id, v_me)
+      on conflict do nothing;
+  end if;
+
+  return v_conv_id;
+end;
+$$;
+
+revoke all on function public.join_hangout(uuid) from public;
+grant execute on function public.join_hangout(uuid) to authenticated;
+
+-- ─────────────── 6) hangout_conversation_id ───────────────
+-- Opening a chat is a read. It was being served by calling join_hangout purely for
+-- its return value — a mutation used as a lookup, which is what made the capacity
+-- bug above fatal instead of merely wrong. Definer so it can see conversations the
+-- caller is a member of without re-entering conversation_members RLS; returns NULL
+-- (not an error) when there is no conversation or the caller isn't in it, so an
+-- anonymous hangout and a not-yet-joined one look the same to the client.
+create or replace function public.hangout_conversation_id(p_hangout_id uuid)
+returns uuid
+language sql
+security definer
+stable
+set search_path = public
+as $$
+  select c.id
+    from public.conversations c
+    join public.conversation_members m
+      on m.conversation_id = c.id and m.user_id = auth.uid()
+   where c.hangout_id = p_hangout_id
+   limit 1;
+$$;
+
+revoke all on function public.hangout_conversation_id(uuid) from public;
+grant execute on function public.hangout_conversation_id(uuid) to authenticated;
+
+-- ─────────────── 7) hangout_attendees: leave via the RPC only ───────────────
+-- 0002's "leave self" policy let a client delete its own attendee row directly.
+-- leave_hangout (definer) removes the attendee row AND the conversation_members
+-- row; the raw delete removes only the former, so a hostile client could drop off
+-- the attendee list while staying in the hangout's group chat — reading it forever
+-- with no RSVP to show for it. Verified the shipping client never deletes this table
+-- directly (it only selects its own rows and inserts the host's implicit self-RSVP),
+-- so removing the policy costs nothing.
+--
+-- The INSERT policy is deliberately KEPT — 0025's header explains that the host's
+-- self-RSVP in lib/posts-store.tsx writes through it, and that the capacity trigger,
+-- not the policy, is what enforces the limit.
+drop policy if exists "hangout_attendees: leave self" on public.hangout_attendees;
+
+-- ═══════════════ 0039_content_write_log.sql ═══════════════
+
+-- quad — rate-limit an append-only write ledger, not live rows
+-- (closes the delete-and-repost bypass in 0036)
+--
+-- 0036 counts rows that CURRENTLY EXIST:
+--
+--   select count(*) from public.gigs
+--    where poster_id = auth.uid() and posted_at > now() - interval '1 hour';
+--
+-- but every one of the five governed tables also has a delete-own RLS policy
+-- — gigs (0002:72), hangouts (0002:94), voices (0005:97), comments (0019),
+-- messages (0021) — so the number the limiter reads is entirely under the
+-- attacker's control.
+--
+-- Failure scenario: post a gig → trg_gigs_push (0012) fires notify_new_post →
+-- send-new-post-push delivers the attacker-controlled title to EVERY
+-- registered device on campus → delete the gig → the count drops back to zero
+-- → repeat. The push is already delivered; deleting the row cannot unsend it.
+-- The loop is unbounded. This is exactly the "one hostile student with a
+-- script could blast the whole campus" scenario 0036's own header says it
+-- prevents, and as written it does not.
+--
+-- Fix: meter an append-only ledger the client has no privilege to touch.
+-- public.content_write_log gets one row per governed insert, written by the
+-- same SECURITY DEFINER trigger that does the check, and the count reads the
+-- ledger instead of the content table. Deleting your gig no longer un-spends
+-- the quota, because the quota was never stored in the gig.
+--
+-- Rejected alternatives:
+--   * Revoke the delete-own policies. Students legitimately delete their own
+--     posts, and 0021's message delete is a shipped feature. Punishing every
+--     honest user to close a limiter hole is the wrong trade.
+--   * Soft-delete (deleted_at) across all five tables. Five schema changes,
+--     five RLS rewrites, and every feed view and count from 0027 onward would
+--     have to learn to filter — an enormous blast radius for a limiter fix,
+--     and it also keeps deleted content on disk, which the privacy policy
+--     does not promise.
+--   * A bucketed counter table keyed (author, kind, hour_start), swept by
+--     pg_cron. Fewer rows, but fixed hour buckets let a burst straddle a
+--     boundary and land 2× the limit inside a 60-second span, and it adds a
+--     scheduled-job dependency. A row-per-write ledger keeps the window truly
+--     rolling and needs no cron.
+--
+-- NOT affected, so nobody "fixes" it later: reports_resolve_target's 20/hr
+-- limit (0030, kept in 0033) counts public.reports, and reports has NO client
+-- delete policy — a reporter cannot delete their own report rows, so that
+-- count is already append-only in practice. Leave it counting reports.
+--
+-- Client-visible breakage: none. Same errcode 54000, same message shape, same
+-- limits (gigs 5 · hangouts 5 · voices 10 · comments 60 · messages 120), same
+-- service-role escape hatch. One deploy-time note: the ledger starts empty, so
+-- at the instant this migration runs every author's window resets — worst case
+-- someone who already posted in the preceding hour gets one extra hour's
+-- allowance, once. Not worth a backfill.
+
+-- ─────────────── content_write_log ───────────────
+-- Deliberately no FK on author_id. The ledger is a two-hour rolling window,
+-- not history: rows age out long before an account-deletion cascade would
+-- matter, and keeping it FK-free means the delete-account Edge Function does
+-- not need to learn about this table.
+create table if not exists public.content_write_log (
+  id         bigint generated always as identity primary key,
+  author_id  uuid not null,
+  kind       text not null,
+  created_at timestamptz not null default now()
+);
+
+-- Covers the only query there is: count by (author, kind) over a recent
+-- window. created_at desc so the window scan starts at the newest row.
+create index if not exists content_write_log_author_kind_created_idx
+  on public.content_write_log (author_id, kind, created_at desc);
+
+alter table public.content_write_log enable row level security;
+
+-- RLS enabled with NO policies: nothing but the definer trigger below ever
+-- touches this table, and a client that could read it would learn how close
+-- another user is to their limit. Supabase's default privileges auto-grant DML
+-- on new objects in public, so strip them explicitly — same belt-and-braces as
+-- feed_events in 0028, so RLS is not the only barrier.
+revoke insert, update, delete, select on public.content_write_log
+  from public, anon, authenticated;
+
+-- ─────────────── the limiter, now reading the ledger ───────────────
+-- Same signature and same tg_argv[0] limit as 0036, so the five existing
+-- rate_limit_* triggers keep working untouched (create or replace preserves
+-- the function OID the triggers point at).
+create or replace function public.enforce_content_rate_limit()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_limit  int  := tg_argv[0]::int;
+  v_author uuid := auth.uid();
+  v_count  int;
+  v_id     bigint;
+begin
+  if v_author is null then
+    -- Definer functions and service-role writes (seeds, moderation) are not
+    -- subject to the limit — unchanged from 0036. They also write no ledger
+    -- row, so seeding cannot spend a real user's quota.
+    return new;
+  end if;
+
+  -- Anything not on the governed list passes through unmetered.
+  if tg_table_name not in ('gigs', 'hangouts', 'voices', 'comments', 'messages') then
+    return new;
+  end if;
+
+  select count(*) into v_count
+    from public.content_write_log
+   where author_id  = v_author
+     and kind       = tg_table_name
+     and created_at > now() - interval '1 hour';
+
+  if v_count >= v_limit then
+    raise exception 'rate limit: too many % in the last hour', tg_table_name
+      using errcode = '54000';
+  end if;
+
+  -- Spend the quota. This runs inside the caller's transaction, so an insert
+  -- that is later rejected (CHECK constraint, another BEFORE trigger, an
+  -- application rollback) takes its ledger row down with it — a failed post
+  -- costs nothing, same as under 0036.
+  insert into public.content_write_log (author_id, kind)
+  values (v_author, tg_table_name)
+  returning id into v_id;
+
+  -- Amortized pruning, in the style of emit_feed_event's sweep in 0028: the
+  -- ledger is a rolling window, not history, so every ~1000th write drops
+  -- everything older than 2× the window. Twice the window, not exactly the
+  -- window, so a long-running transaction's now() can never prune a row the
+  -- limiter still needs to see.
+  if v_id % 1000 = 0 then
+    delete from public.content_write_log
+     where created_at < now() - interval '2 hours';
+  end if;
+
+  return new;
+end;
+$$;
+
+revoke all on function public.enforce_content_rate_limit() from public;
+
+-- ═══════════════ 0040_push_tokens_per_device.sql ═══════════════
+
+-- quad — one push-token row per DEVICE, not per user
+--
+-- 0009 made user_id the PRIMARY KEY of public.user_push_tokens, and
+-- lib/notifications.ts upserts with onConflict: 'user_id'. That silently
+-- assumes one student = one device, which is wrong the moment anyone owns a
+-- phone and an iPad.
+--
+-- Failure scenario: a student installs quad on their iPhone, then on their
+-- iPad. The iPad's registration OVERWRITES the iPhone's row. Every push now
+-- goes to the iPad only; on the phone it reads as "notifications are broken"
+-- with no diagnostic anywhere — no error, no log, nothing the student or we
+-- could see. Worse, signing out on the iPad calls clearPushToken(user_id),
+-- which deletes by user_id and therefore kills BOTH devices until the phone
+-- happens to re-register on its next launch.
+--
+-- Fix: primary key (user_id, expo_push_token) — the row identifies a device
+-- install, not a person. Fan-out already reads user_push_tokens as a list and
+-- batches by 100, so multiple rows per user need no change on the read side.
+--
+-- Rejected alternatives:
+--   * Make expo_push_token the sole primary key ("a device belongs to exactly
+--     one account"). Superficially tidier, but it breaks the client: when a
+--     second student signs in on a shared device, their upsert would have to
+--     UPDATE a row whose user_id is someone else's, and the 0009 RLS policies
+--     are all `user_id = auth.uid()` — the write is denied and that student
+--     silently never registers. The composite key keeps every write inside the
+--     writer's own rows.
+--   * A separate user_devices table with a device_id. More faithful modelling,
+--     but nothing in the app has a stable device identifier to key it on, and
+--     the Expo token is already exactly "this install of this app".
+--
+-- No dedupe step is needed before adding the key: user_id was the PK, so there
+-- is at most one row per user today and the composite key cannot collide.
+--
+-- Do NOT add a separate index on user_id. The composite PK's index leads with
+-- user_id, so every existing lookup (`user_id=eq.…`, `user_id=in.(…)` in the
+-- three push functions, `user_id=eq.…` in delete-account) uses it. A standalone
+-- user_id index would be pure write cost.
+--
+-- RLS is unchanged and stays correct: all four 0009 policies are
+-- `user_id = auth.uid()`, which is a per-row test that does not care how the
+-- table is keyed.
+--
+-- Consequence to be aware of: Expo rotates a token when the app is reinstalled,
+-- so a user who reinstalls leaves a dead row behind instead of overwriting it.
+-- That is what the DeviceNotRegistered receipt handling in the three push
+-- functions is for — it now deletes the one dead row rather than the user's
+-- whole set. `updated_at` is still maintained on every registration if we ever
+-- want a staleness sweep on top.
+--
+-- Client-visible breakage: an upsert with `onConflict: 'user_id'` stops
+-- working the moment this migration lands (PostgREST returns 42P10 — "there is
+-- no unique constraint matching the ON CONFLICT specification"). The matching
+-- client change is in lib/notifications.ts in this same batch; ship the two
+-- together. Old app builds already in someone's hands keep receiving pushes
+-- from their existing row, but stop being able to re-register.
+
+alter table public.user_push_tokens
+  drop constraint if exists user_push_tokens_pkey;
+
+alter table public.user_push_tokens
+  add primary key (user_id, expo_push_token);

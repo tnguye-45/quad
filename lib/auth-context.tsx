@@ -57,9 +57,9 @@ const EDU_DOMAIN = 'nd.edu';
 // (e.g. EXPO_PUBLIC_TEST_EMAIL_DOMAINS=gmail.com). Unset in production, so the
 // hosted build stays @nd.edu-only. This is the CLIENT gate only — Supabase's
 // "Allowed email domains" dashboard setting is the real server-side gate.
-const EXTRA_ALLOWED_DOMAINS = (process.env.EXPO_PUBLIC_TEST_EMAIL_DOMAINS ?? '')
+const EXTRA_ALLOWED_DOMAINS = String(process.env.EXPO_PUBLIC_TEST_EMAIL_DOMAINS ?? '')
   .split(',')
-  .map((d) => d.trim().toLowerCase())
+  .map((d: string) => d.trim().toLowerCase())
   .filter(Boolean);
 
 export function isAllowedEmail(email: string): boolean {

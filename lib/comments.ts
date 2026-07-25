@@ -84,13 +84,15 @@ export function useComments(
     };
   }, []);
 
-  const fetchAll = async () => {
+  const fetchAll = async (opts?: { silent?: boolean }) => {
     if (!realSession || !targetType || !targetId) {
       setComments([]);
       setLoading(false);
       return;
     }
-    setLoading(true);
+    // A catch-up refetch (on channel re-subscribe) shouldn't blank the thread
+    // behind a spinner — only the initial load shows `loading`.
+    if (!opts?.silent) setLoading(true);
     setError(null);
     try {
       const { data, error: e } = await supabase
@@ -155,7 +157,12 @@ export function useComments(
           });
         },
       )
-      .subscribe();
+      // Catch-up on (re)subscribe: comments inserted while the socket was down
+      // fire no event, so re-hydrate the thread once the channel is live —
+      // mirrors messaging.ts's refetch-on-SUBSCRIBED.
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') fetchAll({ silent: true });
+      });
     return () => {
       supabase.removeChannel(channel);
     };
@@ -166,17 +173,35 @@ export function useComments(
     if (!realSession || !targetType || !targetId) return false;
     const trimmed = body.trim();
     if (!trimmed) return false;
-    const { error: e } = await supabase.from('comments').insert({
-      target_type: targetType,
-      target_id: targetId,
-      author_id: session!.user.id,
-      body: trimmed,
-      anonymous: !!opts?.anonymous,
-    });
-    if (e) {
-      console.warn('[comments] insert failed:', e.message);
-      setError(e.message);
+    const { data: inserted, error: e } = await supabase
+      .from('comments')
+      .insert({
+        target_type: targetType,
+        target_id: targetId,
+        author_id: session!.user.id,
+        body: trimmed,
+        anonymous: !!opts?.anonymous,
+      })
+      .select('id')
+      .single();
+    if (e || !inserted) {
+      console.warn('[comments] insert failed:', e?.message);
+      setError(e?.message ?? 'Failed to post comment.');
       return false;
+    }
+    // Append the comment locally instead of waiting for the feed_events echo:
+    // if the channel isn't SUBSCRIBED yet (or the socket dropped), the echo
+    // never arrives and the author sees nothing — and re-posts a duplicate.
+    // Hydrate through the same masked view the realtime path uses; the `some`
+    // guard dedupes against the echo if it does arrive.
+    const { data: row } = await supabase
+      .from('comments_feed')
+      .select(COMMENT_SELECT)
+      .eq('id', inserted.id)
+      .maybeSingle();
+    if (mountedRef.current && row) {
+      const fresh = fromRow(row as unknown as CommentRow);
+      setComments((cur) => (cur.some((cm) => cm.id === fresh.id) ? cur : [...cur, fresh]));
     }
     return true;
   };
@@ -185,13 +210,26 @@ export function useComments(
     if (!realSession) return;
     // Optimistic: drop locally; rely on realtime DELETE to reconcile peers.
     setComments((cur) => cur.filter((c) => c.id !== commentId));
-    const { error: e } = await supabase.from('comments').delete().eq('id', commentId);
+    // Ask for the deleted ids back. A DELETE that RLS filters down to zero
+    // rows is NOT an error — PostgREST answers 204 with no error object — so
+    // an error-only check leaves the comment gone from this list while it is
+    // still on the server. `id` is a granted column, so RETURNING it is safe
+    // on the locked comments table (CLIENT_CONTRACT §1).
+    const { data, error: e } = await supabase
+      .from('comments')
+      .delete()
+      .eq('id', commentId)
+      .select('id');
     if (e) {
       console.warn('[comments] delete failed:', e.message);
       setError(e.message);
       // Reconcile if the delete was denied.
       fetchAll();
+      return;
     }
+    // Silent: the thread is already on screen, and a spinner here would be a
+    // worse lie than the momentary optimistic removal we're undoing.
+    if (!data || data.length === 0) fetchAll({ silent: true });
   };
 
   return useMemo(

@@ -39,10 +39,18 @@ const LANDMARKS: { match: string; lat: number; lon: number }[] = [
   { match: 'airport', lat: 41.7081, lon: -86.3173 },
 ];
 
-function geocode(where: string, seedKey: string): { lat: number; lon: number } {
+// `gigs.lat` / `gigs.lon` exist in the schema but no client path ever writes
+// them, so every coordinate on this map is derived from the free-text location
+// label. A landmark hit is a real building; anything else is a hash-derived
+// point scattered within ~±200m of campus centre purely so two posts don't
+// stack. `placed: false` marks that second kind — it must never be presented
+// as a surveyed location, or someone walks to a pin that means nothing.
+type Placement = { lat: number; lon: number; placed: boolean };
+
+function geocode(where: string, seedKey: string): Placement {
   const haystack = where.toLowerCase();
   for (const lm of LANDMARKS) {
-    if (haystack.includes(lm.match)) return { lat: lm.lat, lon: lm.lon };
+    if (haystack.includes(lm.match)) return { lat: lm.lat, lon: lm.lon, placed: true };
   }
   let hash = 0;
   for (let i = 0; i < seedKey.length; i++) {
@@ -50,29 +58,35 @@ function geocode(where: string, seedKey: string): { lat: number; lon: number } {
   }
   const dx = ((hash & 0xff) / 255 - 0.5) * 0.004;
   const dy = (((hash >> 8) & 0xff) / 255 - 0.5) * 0.004;
-  return { lat: CAMPUS_CENTER.lat + dy, lon: CAMPUS_CENTER.lon + dx };
+  return { lat: CAMPUS_CENTER.lat + dy, lon: CAMPUS_CENTER.lon + dx, placed: false };
+}
+
+/** MapPin has no "approximate" flag to render, so the disclaimer rides along
+ *  in the meta line the pin callout already shows. */
+function withPlacementNote(meta: string, placed: boolean): string {
+  return placed ? meta : `${meta} · location not pinpointed`;
 }
 
 function gigToPin(gig: Gig): Pin {
-  const { lat, lon } = geocode(gig.where, gig.id);
+  const { lat, lon, placed } = geocode(gig.where, gig.id);
   return {
     id: `g-${gig.id}`,
     lat,
     lon,
     title: gig.title,
-    meta: `${gig.payout} · ${gig.where}`,
+    meta: withPlacementNote(`${gig.payout} · ${gig.where}`, placed),
     kind: 'gig',
   };
 }
 
 function hangoutToPin(h: Hangout): Pin {
-  const { lat, lon } = geocode(h.where, h.id);
+  const { lat, lon, placed } = geocode(h.where, h.id);
   return {
     id: `h-${h.id}`,
     lat,
     lon,
     title: h.title,
-    meta: `${h.going} going · ${h.when} · ${h.where}`,
+    meta: withPlacementNote(`${h.going} going · ${h.when} · ${h.where}`, placed),
     kind: 'hangout',
   };
 }
@@ -194,7 +208,7 @@ export default function MapScreen() {
             <ThemedText
               style={[styles.headerSubtitle, { color: c.textMuted }]}
               type="mono">
-              campus map · notre dame
+              campus map · approximate pins
             </ThemedText>
           </View>
           <View style={styles.backBtn} />

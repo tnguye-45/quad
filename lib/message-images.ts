@@ -23,23 +23,25 @@ export type MessageImageUploadResult =
  * + final pixel dimensions. The dimensions are stored on the message row so
  * the chat bubble can size correctly before the image finishes downloading.
  *
- * Path scheme: `{userId}/{timestamp}-{random}.jpg`. RLS on storage.objects
- * checks `auth.uid()::text` against the first path segment, so users can
- * only upload under their own folder.
+ * Path scheme: `{conversationId}/{timestamp}-{random}.jpg` (0037). The path
+ * must NOT contain the uploader's uid: image URLs are visible to every
+ * conversation member, and a uid in the path de-anonymizes an anonymous
+ * hangout host. RLS on storage.objects checks the first path segment against
+ * the uploader's conversation memberships.
  *
  * EXIF stripping: we re-encode as JPEG via expo-image-manipulator, which
  * drops EXIF metadata as a side effect (no GPS coords or device IDs leak).
  * We also clamp the long edge to MAX_EDGE px.
  */
 export async function uploadMessageImage(
-  userId: string,
+  conversationId: string,
   localUri: string,
 ): Promise<MessageImageUploadResult> {
   try {
     const processed = await resizeAndStripExif(localUri);
     const stamp = Date.now();
     const rand = Math.random().toString(36).slice(2, 8);
-    const path = `${userId}/${stamp}-${rand}.jpg`;
+    const path = `${conversationId}/${stamp}-${rand}.jpg`;
 
     const body = await readAsUploadBody(processed.uri);
     const { error: uploadErr } = await supabase.storage

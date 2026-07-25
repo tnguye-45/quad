@@ -34,6 +34,7 @@ import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useAuth } from '@/lib/auth-context';
+import { confirmAsync, notify } from '@/lib/confirm';
 import { useDevConversations, type DevConversation } from '@/lib/dev-conversations';
 import {
   useThread,
@@ -174,6 +175,7 @@ function RealChat({
     partnerName,
     partnerInitials,
     partnerAvatarUrl,
+    partnerIsMasked,
     loading,
     error,
     send,
@@ -191,6 +193,13 @@ function RealChat({
   const [selected, setSelected] = useState<Set<string> | null>(null);
   const selecting = selected !== null;
   const scrollRef = useRef<ScrollView | null>(null);
+  // Survives a failed send so the retry reuses the already-uploaded object.
+  const uploadedImageRef = useRef<{
+    localUri: string;
+    url: string;
+    width: number;
+    height: number;
+  } | null>(null);
 
   function enterSelection(id: string) {
     setSelected(new Set([id]));
@@ -204,24 +213,18 @@ function RealChat({
       return next;
     });
   }
-  function confirmDeleteSelected() {
+  async function confirmDeleteSelected() {
     if (!selected || selected.size === 0) return;
     const n = selected.size;
-    Alert.alert(
-      n === 1 ? 'Delete message?' : `Delete ${n} messages?`,
-      'This removes them for everyone in this chat.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            const ok = await deleteMessages([...selected]);
-            if (ok) setSelected(null);
-          },
-        },
-      ],
-    );
+    const confirmed = await confirmAsync({
+      title: n === 1 ? 'Delete message?' : `Delete ${n} messages?`,
+      message: 'This removes them for everyone in this chat.',
+      confirmLabel: 'Delete',
+      destructive: true,
+    });
+    if (!confirmed) return;
+    const ok = await deleteMessages([...selected]);
+    if (ok) setSelected(null);
   }
 
   useEffect(() => {
@@ -238,24 +241,39 @@ function RealChat({
     const text = draft.trim();
     if (!text && !pendingImage) return;
     if (pendingImage) {
-      setUploading(true);
-      const out = await uploadMessageImage(userId, pendingImage);
-      setUploading(false);
-      if ('error' in out) {
-        Alert.alert("Couldn't send image", out.error);
-        return;
+      if (!conversationId) return;
+      // Reuse a prior successful upload when retrying after a failed send —
+      // re-uploading orphans the first object in the bucket forever.
+      let img =
+        uploadedImageRef.current?.localUri === pendingImage
+          ? uploadedImageRef.current
+          : null;
+      if (!img) {
+        setUploading(true);
+        // Keyed by conversation id, NOT user id — a uid in the storage path
+        // is readable by every member and de-anonymizes an anonymous host.
+        const out = await uploadMessageImage(conversationId, pendingImage);
+        setUploading(false);
+        if ('error' in out) {
+          notify({ title: "Couldn't send image", message: out.error });
+          return;
+        }
+        img = { localUri: pendingImage, url: out.url, width: out.width, height: out.height };
+        uploadedImageRef.current = img;
       }
       setPendingImage(null);
       setDraft('');
       const ok = await send({
         body: text || undefined,
-        image: { url: out.url, width: out.width, height: out.height },
+        image: { url: img.url, width: img.width, height: img.height },
       });
       // Hand the draft back rather than silently eating what they typed.
       if (!ok) {
         setDraft(text);
         setPendingImage(pendingImage);
+        return;
       }
+      uploadedImageRef.current = null;
     } else {
       setDraft('');
       const ok = await send({ body: text });
@@ -266,7 +284,10 @@ function RealChat({
   async function pickFromLibrary() {
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!perm.granted) {
-      Alert.alert('Photo access needed', 'Allow photo access in Settings to send images.');
+      notify({
+        title: 'Photo access needed',
+        message: 'Allow photo access in Settings to send images.',
+      });
       return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -282,7 +303,10 @@ function RealChat({
   async function pickFromCamera() {
     const perm = await ImagePicker.requestCameraPermissionsAsync();
     if (!perm.granted) {
-      Alert.alert('Camera access needed', 'Allow camera access in Settings to send photos.');
+      notify({
+        title: 'Camera access needed',
+        message: 'Allow camera access in Settings to send photos.',
+      });
       return;
     }
     const result = await ImagePicker.launchCameraAsync({
@@ -307,6 +331,11 @@ function RealChat({
           else if (idx === 2) pickFromLibrary();
         },
       );
+    } else if (Platform.OS === 'web') {
+      // Alert.alert is a no-op on web, so the action sheet never appears and
+      // attaching is dead. There's no camera picker on web anyway — go straight
+      // to the library chooser.
+      pickFromLibrary();
     } else {
       Alert.alert('Add a photo', undefined, [
         { text: 'Cancel', style: 'cancel' },
@@ -321,6 +350,15 @@ function RealChat({
     : conversation?.hangout
       ? `Hangout · ${conversation.hangout.title}`
       : 'Conversation';
+
+  // A masked counterpart is an anonymous author (an anonymous hangout host, on a
+  // thread created before 0038 stopped those chats existing). `otherReads` still
+  // carries their REAL uid — conversation_members is readable to every member — so
+  // it must never reach the block insert or the report params, where the public
+  // profiles directory turns a uid straight back into a name. Fall back to
+  // reporting the hangout; ChatHeaderMenu hides Block on its own when
+  // otherUserId is empty.
+  const canActOnPartner = otherReads.length === 1 && !partnerIsMasked;
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
@@ -337,10 +375,21 @@ function RealChat({
             right={
               <ChatHeaderMenu
                 conversationId={conversationId}
-                // Only a 1:1 thread has a single counterpart to block; in a
-                // hangout group chat the menu is report-only.
-                otherUserId={otherReads.length === 1 ? otherReads[0].userId : ''}
-                otherUserName={otherReads.length === 1 ? partnerName : undefined}
+                // Only a 1:1 thread with an UNMASKED counterpart has someone to
+                // block; a group chat, or a masked anonymous author, is
+                // report-only (see canActOnPartner).
+                otherUserId={canActOnPartner ? otherReads[0].userId : ''}
+                otherUserName={canActOnPartner ? partnerName : undefined}
+                // Report a real target: the counterpart's profile in a 1:1
+                // thread, the hangout otherwise. (The old default — targetKind
+                // "message" + a conversation id — always failed the server
+                // resolver, which expects a message id.)
+                targetKind={canActOnPartner ? 'profile' : 'hangout'}
+                targetId={
+                  canActOnPartner
+                    ? otherReads[0].userId
+                    : conversation?.hangout_id ?? ''
+                }
               />
             }
           />
@@ -465,11 +514,16 @@ function RealChat({
             </View>
           ) : null}
 
+          {/* Render the real message. useThread already maps the codes that
+              matter to user-facing copy (42501 = blocked, 54000 = rate limited);
+              the old hardcoded "check your connection" told a blocked user their
+              wifi was bad and left them retrying forever, and said "couldn't
+              send" when the failure was actually a failed thread LOAD. */}
           {error ? (
             <View style={[styles.errorBar, { borderTopColor: c.border }]}>
               <IconSymbol name="exclamationmark.triangle" size={13} color={c.danger} />
               <ThemedText style={[styles.errorText, { color: c.danger }]} type="mono">
-                couldn&apos;t send — check your connection
+                {error}
               </ThemedText>
             </View>
           ) : null}
@@ -775,24 +829,18 @@ function DevChat({
       return next;
     });
   }
-  function confirmDeleteSelected() {
+  async function confirmDeleteSelected() {
     if (!selected || selected.size === 0) return;
     const n = selected.size;
-    Alert.alert(
-      n === 1 ? 'Delete message?' : `Delete ${n} messages?`,
-      'This removes them for everyone in this chat.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: () => {
-            deleteMessages(conversationId, [...selected]);
-            setSelected(null);
-          },
-        },
-      ],
-    );
+    const confirmed = await confirmAsync({
+      title: n === 1 ? 'Delete message?' : `Delete ${n} messages?`,
+      message: 'This removes them for everyone in this chat.',
+      confirmLabel: 'Delete',
+      destructive: true,
+    });
+    if (!confirmed) return;
+    deleteMessages(conversationId, [...selected]);
+    setSelected(null);
   }
 
   // Clear the unread dot once the thread is open.

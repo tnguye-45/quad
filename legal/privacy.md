@@ -11,7 +11,7 @@ quad is a Notre Dame student community app. This document describes what we coll
 - **Posts.** Gigs you post, hangouts you host, voices (opinion posts) you submit. Voices are anonymous to other users by default.
 - **Messages.** The bodies of messages you send to other students.
 - **Push token.** When you opt into notifications, we store a device-specific push token so we can deliver them.
-- **Location.** If you tag a post with a location, we store the coarse lat/lon. We do not track your live location.
+- **Location.** Posts carry a free-text location label you type yourself, like "Hesburgh Library". We do not collect device location — coarse or precise — and we do not track where you are.
 
 ## What we do NOT collect
 

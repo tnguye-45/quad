@@ -116,8 +116,12 @@ export default function StartHangoutScreen() {
         hostInitials: profile?.initials ?? null,
         hostAvatarUrl: profile?.avatar_url ?? null,
       });
-      if (!ok) {
-        setErr("Couldn't start your hangout. Check your connection and try again.");
+      if (ok !== true) {
+        setErr(
+          ok === 'rate_limited'
+            ? "You're hosting a lot right now — try again in a bit."
+            : "Couldn't start your hangout. Check your connection and try again.",
+        );
         return;
       }
       router.back();

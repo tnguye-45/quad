@@ -1,11 +1,18 @@
 // Inline copies of the legal markdown so they ship in the JS bundle without
-// configuring a Metro text-loader. Keep these in sync with the canonical
-// `legal/privacy.md` and `legal/tos.md` files — that's the document of
-// record for legal review; this file is just the runtime mirror.
+// configuring a Metro text-loader. `legal/privacy.md` and `legal/tos.md` are
+// the documents of record for legal review; this file is the runtime mirror
+// and must never say something they don't.
 //
-// If a future change makes drift painful, swap to a Metro asset transformer
-// (e.g. metro-transform-worker overrides for .md) and read the .md files at
-// runtime instead. For pre-1.0 it's not worth the build-config churn.
+// That relationship is enforced, not trusted: `scripts/check-legal-sync.mjs`
+// runs in both CI workflows and fails the build if either constant drifts
+// from its .md. Edit the .md first, then paste it here — the one difference
+// the check tolerates is inline-code backticks, which app/legal/_renderer.tsx
+// has no syntax for and which would otherwise render as literal characters.
+//
+// If a future change makes the duplication painful, swap to a Metro asset
+// transformer (e.g. metro-transform-worker overrides for .md) and read the
+// .md files at runtime instead. For pre-1.0 it's not worth the build-config
+// churn.
 
 export const PRIVACY_MARKDOWN = `# Privacy Policy
 
@@ -20,7 +27,7 @@ quad is a Notre Dame student community app. This document describes what we coll
 - **Posts.** Gigs you post, hangouts you host, voices (opinion posts) you submit. Voices are anonymous to other users by default.
 - **Messages.** The bodies of messages you send to other students.
 - **Push token.** When you opt into notifications, we store a device-specific push token so we can deliver them.
-- **Location.** If you tag a post with a location, we store the coarse lat/lon. We do not track your live location.
+- **Location.** Posts carry a free-text location label you type yourself, like "Hesburgh Library". We do not collect device location — coarse or precise — and we do not track where you are.
 
 ## What we do NOT collect
 
@@ -36,7 +43,7 @@ quad is a Notre Dame student community app. This document describes what we coll
 
 ## Deletion
 
-You can delete your account at any time from Account settings → Delete my account. This removes your profile, posts, hangouts, voices, push tokens, and messages you sent. Messages others sent to you remain in those conversations for the other party's history.
+You can delete your account at any time from **Account settings → Delete my account**. This removes your profile, posts, hangouts, voices, push tokens, and messages you sent. Messages others sent to you remain in those conversations for the other party's history.
 
 ## Changes
 

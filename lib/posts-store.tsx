@@ -180,12 +180,28 @@ type Store = {
   /** Cursor-based pagination on posted_at / created_at. Idempotent: a no-op
    *  while a load is already in flight for that kind. */
   loadMore: (kind: 'gigs' | 'hangouts' | 'voices') => Promise<void>;
-  /** Resolves true when the post reached the server (or dev store). Callers
+  /** The gig category/search filter, applied SERVER-SIDE. See GigFeedSlice. */
+  gigFeed: GigFeedSlice;
+  setGigFilter: (next: GigFilter) => void;
+  /** Next page of the filtered gig feed. Same keyset machinery as loadMore,
+   *  with its own cursor and generation counter. */
+  loadMoreGigFeed: () => Promise<void>;
+  /** Resolves `true` when the post reached the server (or dev store) —
+   *  compare with `=== true`, the failure values are truthy strings. Callers
    *  use this to decide whether to close the compose screen. */
-  addGig: (input: AddGigInput) => Promise<boolean>;
-  addHangout: (input: AddHangoutInput) => Promise<boolean>;
-  addVoice: (input: AddVoiceInput) => Promise<boolean>;
-  rsvpHangout: (id: string) => Promise<void>;
+  addGig: (input: AddGigInput) => Promise<AddResult>;
+  addHangout: (input: AddHangoutInput) => Promise<AddResult>;
+  addVoice: (input: AddVoiceInput) => Promise<AddResult>;
+  /** One-shot fetch of a single post through its feed view, merged into the
+   *  store. Detail screens use this when a deep link / push tap points at a
+   *  post older than the pages loaded so far — without it, anything past the
+   *  first page renders a false "404 · gone". */
+  fetchPostById: (kind: 'gig' | 'hangout' | 'voice', id: string) => Promise<PostLookup>;
+  rsvpHangout: (id: string) => Promise<RsvpResult>;
+  /** Undo an RSVP. Backed by the `leave_hangout` RPC, which removes the attendee
+   *  row AND the group-conversation membership — the two must go together, which
+   *  is why 0038 revoked the direct-delete policy on hangout_attendees. */
+  leaveHangout: (id: string) => Promise<LeaveResult>;
   /** Hangout ids the current user has already joined (including hangouts they
    *  host). rsvpHangout no-ops for these so a quick double-tap can't inflate
    *  the going count. */
@@ -198,26 +214,109 @@ type Store = {
   voteVoice: (id: string, arrow: 1 | -1) => Promise<void>;
 };
 
+/** Result of fetchPostById: 'missing' means the server says it's gone (or
+ *  masked/blocked out of the view); 'error' means we couldn't ask — screens
+ *  should offer retry, not claim the post was deleted. */
+export type PostLookup = 'found' | 'missing' | 'error';
+
+/** Failure detail for the composers: 'rate_limited' is the 0036 per-author
+ *  insert cap (errcode 54000) and deserves its own copy — "check your
+ *  connection" would be a lie. */
+export type AddResult = true | 'rate_limited' | 'error';
+
+/** Result of rsvpHangout. Mutation outcomes are returned to the caller (and
+ *  surfaced next to the button that was tapped) instead of being funneled
+ *  into the store-wide `error`, which the feed tabs render as a misleading
+ *  "Couldn't load" banner. */
+export type RsvpResult =
+  | { status: 'ok' | 'already'; conversationId: string | null }
+  | { status: 'full' | 'blocked' | 'not_found' | 'error'; conversationId: null };
+
+/** Result of leaveHangout. 'host' is the server refusing to let a host abandon
+ *  their own hangout (errcode 22023) — they have to cancel it instead. */
+export type LeaveResult = 'ok' | 'host' | 'not_found' | 'error';
+
+/** Category chip + search box on the Gigs tab. Both are pushed down into the
+ *  gigs_feed query rather than applied to the loaded pages: filtering client-
+ *  side meant `loadMore` was disabled under a filter, so a category whose
+ *  posts were all older than page 1 rendered as empty — and the empty state
+ *  then asserted "no tutoring gigs in the feed yet", which was false. */
+export type GigFilter = { category: GigCategory | null; query: string };
+
+export const NO_GIG_FILTER: GigFilter = { category: null, query: '' };
+
+export function gigFilterIsActive(f: GigFilter): boolean {
+  return f.category !== null || f.query.trim().length > 0;
+}
+
+/** Server-filtered gig feed. `rows` is null while no filter is applied — the
+ *  Gigs tab renders the unfiltered `gigs` then. Deliberately a separate list
+ *  rather than narrowing `gigs` itself: the map screen and the "your posts"
+ *  history both read `gigs`, and neither should shrink because someone tapped
+ *  a category chip.
+ *
+ *  Known gap: realtime feed_events and the optimistic insert in addGig patch
+ *  `gigs` only. A gig posted by someone else while a filter is on appears on
+ *  the next filter change or pull-to-refresh, not instantly. */
+export type GigFeedSlice = {
+  filter: GigFilter;
+  rows: Gig[] | null;
+  loading: boolean;
+  error: string | null;
+  hasMore: boolean;
+};
+
+/** Client-side equivalent of the server filter, for the dev/demo session
+ *  whose seeds only exist in memory. Kept in step with gigSearchFilter below:
+ *  same three columns, same substring semantics. */
+export function gigMatchesFilter(gig: Gig, filter: GigFilter): boolean {
+  if (filter.category && gig.category !== filter.category) return false;
+  const q = filter.query.trim().toLowerCase();
+  if (!q) return true;
+  return [gig.title, gig.where, gig.category].some((field) =>
+    field.toLowerCase().includes(q),
+  );
+}
+
 /** How many rows to fetch per page on initial load + each loadMore call. */
 const PAGE_SIZE = 20;
 
 const PostsContext = createContext<Store | null>(null);
 
 // ─────────────────────── DB ↔ App mappers ───────────────────────
+// Everything from here to the end of this section is pure and exported for
+// __tests__/posts-store.test.ts — these are the functions a refactor is most
+// likely to break silently (money rounding, cursor quoting, expiry windows).
 
-function dollarsToCents(payout: string): number {
-  const n = Number(payout.replace(/[^0-9.]/g, ''));
-  return Math.max(1, Math.round((Number.isFinite(n) ? n : 0) * 100));
+/** Payout entry is a free-text field, so this is deliberately a NARROW
+ *  contract, not a best-effort parser: whole dollars only, `$` and commas
+ *  ignored, everything else rejected. Returns null for input it cannot
+ *  represent so the caller can say so instead of storing a number the user
+ *  never typed. The old behaviour floored junk to 1 cent, which turned a
+ *  fat-fingered "1.5.5" into a $0.01 gig; "$30/hr" still stores 3000 (and
+ *  re-renders as "$30") because cents/hourly rates aren't modelled at all. */
+export function dollarsToCents(payout: string): number | null {
+  const digits = payout.replace(/[$,\s]/g, '');
+  // A leading number optionally followed by non-numeric suffix text ("/hr").
+  const m = digits.match(/^(\d+)(?:\.(\d{1,2}))?(?:[^\d.].*)?$/);
+  if (!m) return null;
+  const cents = Number(m[1]) * 100 + Number((m[2] ?? '0').padEnd(2, '0'));
+  // Mirrors the DB check on gigs.payout_cents (> 0, capped at $10,000) so an
+  // out-of-range value is refused here rather than as an opaque 23514.
+  if (cents <= 0 || cents > 1_000_000) return null;
+  return cents;
 }
 
-function centsToPayout(cents: number): string {
+/** Inverse of dollarsToCents, lossy by design: sub-dollar precision is
+ *  rounded away because every surface renders whole dollars. */
+export function centsToPayout(cents: number): string {
   const dollars = Math.round(cents / 100);
   return `$${dollars}`;
 }
 
-function timeAgo(iso: string): string {
+export function timeAgo(iso: string, now: number = Date.now()): string {
   const ts = new Date(iso).getTime();
-  const diff = Math.max(0, Math.floor((Date.now() - ts) / 1000));
+  const diff = Math.max(0, Math.floor((now - ts) / 1000));
   if (diff < 60) return 'just now';
   const m = Math.floor(diff / 60);
   if (m < 60) return `${m}m ago`;
@@ -235,8 +334,23 @@ function timeAgo(iso: string): string {
 // a plain `.lt(posted_at)` would silently drop every row past the first at that
 // timestamp. Timestamp/id values are double-quoted so `+`/`:` in the timestamp
 // don't confuse the filter parser.
-function keysetOlderThan(tsCol: string, ts: string, id: string): string {
+export function keysetOlderThan(tsCol: string, ts: string, id: string): string {
   return `${tsCol}.lt."${ts}",and(${tsCol}.eq."${ts}",id.lt."${id}")`;
+}
+
+// Free-text gig search as a PostgREST `.or()` over the three columns the old
+// client-side filter matched. The term is double-quoted so spaces, commas and
+// parens in "hesburgh, 2nd floor" can't be read as .or() syntax, and the
+// characters that could close that quote (or smuggle in a wildcard) are
+// stripped: `*` becomes `%` server-side, so a literal `%` would silently
+// widen the match. Returns null when nothing searchable survives — an empty
+// pattern is `%%`, which matches every row.
+export function gigSearchFilter(query: string): string | null {
+  const term = query.replace(/["\\%]/g, ' ').trim();
+  if (!term) return null;
+  return ['title', 'location_label', 'category']
+    .map((col) => `${col}.ilike."*${term}*"`)
+    .join(',');
 }
 
 // INSERT returns (CLIENT_CONTRACT.md §1): identity columns are structurally
@@ -256,7 +370,7 @@ const VOICE_RETURN_SELECT =
 // block filter. The client-side masking in the mappers is now display sugar,
 // not the defense.
 
-type DbGigFeedRow = {
+export type DbGigFeedRow = {
   id: string;
   anonymous: boolean;
   title: string;
@@ -276,7 +390,7 @@ const GIG_FEED_SELECT =
   'id, anonymous, title, description, category, payout_cents, location_label, ' +
   'posted_at, comment_count, poster_id, poster_display_name, poster_initials, poster_avatar_url';
 
-function gigFromFeed(row: DbGigFeedRow): Gig {
+export function gigFromFeed(row: DbGigFeedRow): Gig {
   return {
     id: row.id,
     // Null for someone else's anonymous gig — '' keeps the Gig type stable and
@@ -298,7 +412,7 @@ function gigFromFeed(row: DbGigFeedRow): Gig {
   };
 }
 
-type DbHangoutFeedRow = {
+export type DbHangoutFeedRow = {
   id: string;
   anonymous: boolean;
   title: string;
@@ -320,7 +434,7 @@ const HANGOUT_FEED_SELECT =
   'id, anonymous, title, vibe, location_label, when_label, starts_at, description, ' +
   'created_at, comment_count, going_count, host_id, host_display_name, host_initials, host_avatar_url';
 
-function hangoutFromFeed(row: DbHangoutFeedRow): Hangout {
+export function hangoutFromFeed(row: DbHangoutFeedRow): Hangout {
   return {
     id: row.id,
     ownerId: row.host_id ?? '',
@@ -341,7 +455,7 @@ function hangoutFromFeed(row: DbHangoutFeedRow): Hangout {
   };
 }
 
-type DbVoiceFeedRow = {
+export type DbVoiceFeedRow = {
   id: string;
   anonymous: boolean;
   body: string;
@@ -359,7 +473,7 @@ const VOICE_FEED_SELECT =
   'id, anonymous, body, topic, posted_at, vote_score, comment_count, ' +
   'author_id, author_display_name, author_initials, author_avatar_url';
 
-function voiceFromFeed(row: DbVoiceFeedRow): Voice {
+export function voiceFromFeed(row: DbVoiceFeedRow): Voice {
   return {
     id: row.id,
     ownerId: row.author_id ?? '',
@@ -379,10 +493,10 @@ function voiceFromFeed(row: DbVoiceFeedRow): Voice {
 
 // A hangout stays in the feed until 2 hours after its start; when_label-only
 // rows (no starts_at) never expire because there's nothing to judge them by.
-const HANGOUT_GRACE_MS = 2 * 60 * 60 * 1000;
+export const HANGOUT_GRACE_MS = 2 * 60 * 60 * 1000;
 
-function hangoutIsLive(h: Hangout): boolean {
-  return h.startsAt == null || h.startsAt > Date.now() - HANGOUT_GRACE_MS;
+export function hangoutIsLive(h: Hangout, now: number = Date.now()): boolean {
+  return h.startsAt == null || h.startsAt > now - HANGOUT_GRACE_MS;
 }
 
 // Server-side half of the same rule, ANDed with the keyset filter — dead
@@ -417,6 +531,11 @@ export function PostsProvider({ children }: { children: ReactNode }) {
   // Hangouts the user has already joined — rsvpHangout no-ops for these.
   const [myRsvps, setMyRsvps] = useState<Record<string, true>>({});
   const rsvpInFlightRef = useRef<Set<string>>(new Set());
+  // Per-voice vote serialization: only one set_voice_vote RPC is in flight per
+  // voice at a time, and the latest desired target is remembered so rapid
+  // up→clear taps can't land server-side out of order.
+  const voteSyncingRef = useRef<Set<string>>(new Set());
+  const voteTargetRef = useRef<Map<string, 1 | -1 | 0>>(new Map());
   // Guards so a fast-flick on a FlatList doesn't fire overlapping loadMore
   // round-trips — onEndReached fires multiple times per scroll on iOS.
   const loadingMoreRef = useRef<{ gigs: boolean; hangouts: boolean; voices: boolean }>({
@@ -438,6 +557,25 @@ export function PostsProvider({ children }: { children: ReactNode }) {
     voices?: { ts: string; id: string };
   }>({});
 
+  // ── server-side gig filter ──
+  // Its own cursor, in-flight guard and generation counter, mirroring the
+  // unfiltered feed's. They must stay separate: a page fetched under
+  // "Tutoring" appended to a list that has since switched to "Moving" would
+  // show the wrong rows, and sharing fetchGenRef would make a plain refresh
+  // silently invalidate filtered pages (and vice versa).
+  const [gigFilter, setGigFilterState] = useState<GigFilter>(NO_GIG_FILTER);
+  const [filteredGigs, setFilteredGigs] = useState<Gig[] | null>(null);
+  const [filteredGigsLoading, setFilteredGigsLoading] = useState(false);
+  const [filteredGigsError, setFilteredGigsError] = useState<string | null>(null);
+  const [hasMoreFilteredGigs, setHasMoreFilteredGigs] = useState(false);
+  const filterGenRef = useRef(0);
+  const filterCursorRef = useRef<{ ts: string; id: string } | undefined>(undefined);
+  const filterLoadingMoreRef = useRef(false);
+  // Late-bound so fetchAll (pull-to-refresh, realtime re-subscribe) can also
+  // refresh the filtered list without taking gigFilter as a dependency — that
+  // would rebuild fetchAll on every keystroke and re-fetch all three feeds.
+  const refreshFilteredGigsRef = useRef<() => void>(() => {});
+
   const fetchAll = useCallback(async () => {
     if (!realSession) {
       // Dev / unauthenticated: use seeds so the UI is non-empty.
@@ -448,6 +586,7 @@ export function PostsProvider({ children }: { children: ReactNode }) {
       setLoading(false);
       setError(null);
       setHasMore({ gigs: false, hangouts: false, voices: false });
+      refreshFilteredGigsRef.current();
       return;
     }
     const gen = ++fetchGenRef.current;
@@ -494,23 +633,37 @@ export function PostsProvider({ children }: { children: ReactNode }) {
         voices: lastVoice ? { ts: lastVoice.posted_at, id: lastVoice.id } : undefined,
       };
       setGigs(gigsData.map(gigFromFeed));
-      setHangouts(hangoutsData.map(hangoutFromFeed).filter(hangoutIsLive));
+      // Arrow wrapper, not a bare reference: Array.filter passes the index as
+      // the second argument, which hangoutIsLive would read as `now`.
+      setHangouts(hangoutsData.map(hangoutFromFeed).filter((h) => hangoutIsLive(h)));
       setVoices(voicesData.map(voiceFromFeed));
       setHasMore({
         gigs: gigsData.length === PAGE_SIZE,
         hangouts: hangoutsData.length === PAGE_SIZE,
         voices: voicesData.length === PAGE_SIZE,
       });
-      const voteMap: Record<string, 1 | -1> = {};
-      for (const v of votesRes.data ?? []) {
-        voteMap[v.voice_id] = v.value === 1 ? 1 : -1;
+      // votes/rsvps are secondary to the feed, so a failure here shouldn't blank
+      // the feed — but it also must not overwrite the existing highlight maps
+      // with {}. Skip the update on error and keep what we had; the RSVP guard
+      // (myRsvps) and vote highlights survive a flaky refresh.
+      if (votesRes.error) {
+        console.warn('[posts-store] vote fetch failed:', votesRes.error.message);
+      } else {
+        const voteMap: Record<string, 1 | -1> = {};
+        for (const v of votesRes.data ?? []) {
+          voteMap[v.voice_id] = v.value === 1 ? 1 : -1;
+        }
+        setMyVotes(voteMap);
       }
-      setMyVotes(voteMap);
-      const rsvpMap: Record<string, true> = {};
-      for (const r of (rsvpRes.data ?? []) as { hangout_id: string }[]) {
-        rsvpMap[r.hangout_id] = true;
+      if (rsvpRes.error) {
+        console.warn('[posts-store] rsvp fetch failed:', rsvpRes.error.message);
+      } else {
+        const rsvpMap: Record<string, true> = {};
+        for (const r of (rsvpRes.data ?? []) as { hangout_id: string }[]) {
+          rsvpMap[r.hangout_id] = true;
+        }
+        setMyRsvps(rsvpMap);
       }
-      setMyRsvps(rsvpMap);
     } catch (e: unknown) {
       if (fetchGenRef.current !== gen) return;
       const msg = e instanceof Error ? e.message : 'Failed to load posts.';
@@ -520,6 +673,9 @@ export function PostsProvider({ children }: { children: ReactNode }) {
       if (fetchGenRef.current === gen) {
         setHydrated(true);
         setLoading(false);
+        // A pull-to-refresh under an active filter must refresh what the user
+        // is actually looking at, not just the list behind it.
+        refreshFilteredGigsRef.current();
       }
     }
   }, [realSession, session]);
@@ -580,7 +736,7 @@ export function PostsProvider({ children }: { children: ReactNode }) {
           }
           const last = rows[rows.length - 1];
           cursorRef.current.hangouts = { ts: last.created_at, id: last.id };
-          const added = rows.map(hangoutFromFeed).filter(hangoutIsLive);
+          const added = rows.map(hangoutFromFeed).filter((h) => hangoutIsLive(h));
           setHangouts((cur) => {
             const curSeen = new Set(cur.map((h) => h.id));
             return [...cur, ...added.filter((h) => !curSeen.has(h.id))];
@@ -619,6 +775,143 @@ export function PostsProvider({ children }: { children: ReactNode }) {
     },
     [realSession, hasMore],
   );
+
+  // One page of gigs_feed under the active filter. Shared by the initial
+  // filtered fetch and loadMoreGigFeed so the two can never drift apart on
+  // which predicates they apply — PostgREST ANDs successive .or() calls, so
+  // the keyset window and the search window compose correctly.
+  const gigFilterPage = useCallback(
+    (filter: GigFilter, cursor?: { ts: string; id: string }) => {
+      let q = supabase.from('gigs_feed').select(GIG_FEED_SELECT);
+      if (filter.category) q = q.eq('category', filter.category);
+      const search = gigSearchFilter(filter.query);
+      if (search) q = q.or(search);
+      if (cursor) q = q.or(keysetOlderThan('posted_at', cursor.ts, cursor.id));
+      return q
+        .order('posted_at', { ascending: false })
+        .order('id', { ascending: false })
+        .limit(PAGE_SIZE);
+    },
+    [],
+  );
+
+  // Identity-stable: the Gigs tab re-pushes its filter on every render pass of
+  // the debounce, and a new-but-equal object would re-run the whole query.
+  const setGigFilter = useCallback((next: GigFilter) => {
+    setGigFilterState((cur) =>
+      cur.category === next.category && cur.query === next.query ? cur : next,
+    );
+  }, []);
+
+  const fetchFilteredGigs = useCallback(async () => {
+    const gen = ++filterGenRef.current;
+    filterCursorRef.current = undefined;
+    // Dev/demo sessions have no backend; gigMatchesFilter runs over the
+    // in-memory list in the gigFeed memo below, so there's nothing to fetch.
+    if (!gigFilterIsActive(gigFilter) || !realSession) {
+      setFilteredGigs(null);
+      setFilteredGigsLoading(false);
+      setFilteredGigsError(null);
+      setHasMoreFilteredGigs(false);
+      return;
+    }
+    setFilteredGigsLoading(true);
+    setFilteredGigsError(null);
+    try {
+      const { data, error: err } = await gigFilterPage(gigFilter);
+      if (err) throw err;
+      if (filterGenRef.current !== gen) return;
+      const rows = (data ?? []) as unknown as DbGigFeedRow[];
+      const last = rows[rows.length - 1];
+      filterCursorRef.current = last ? { ts: last.posted_at, id: last.id } : undefined;
+      setFilteredGigs(rows.map(gigFromFeed));
+      setHasMoreFilteredGigs(rows.length === PAGE_SIZE);
+    } catch (e: unknown) {
+      if (filterGenRef.current !== gen) return;
+      const msg = e instanceof Error ? e.message : 'Failed to load gigs.';
+      console.warn('[posts-store] filtered gig fetch failed:', msg);
+      // Leave `rows` null and report the error: an empty array here would
+      // render the "nothing in this category" empty state, which is exactly
+      // the false claim this whole change exists to remove.
+      setFilteredGigs(null);
+      setFilteredGigsError(msg);
+      setHasMoreFilteredGigs(false);
+    } finally {
+      if (filterGenRef.current === gen) setFilteredGigsLoading(false);
+    }
+  }, [gigFilter, realSession, gigFilterPage]);
+
+  useEffect(() => {
+    void fetchFilteredGigs();
+    refreshFilteredGigsRef.current = () => {
+      void fetchFilteredGigs();
+    };
+  }, [fetchFilteredGigs]);
+
+  const loadMoreGigFeed = useCallback(async () => {
+    if (!realSession || !gigFilterIsActive(gigFilter)) return;
+    if (filterLoadingMoreRef.current || !hasMoreFilteredGigs) return;
+    const cursor = filterCursorRef.current;
+    if (!cursor) return;
+    const gen = filterGenRef.current;
+    filterLoadingMoreRef.current = true;
+    try {
+      const { data, error: err } = await gigFilterPage(gigFilter, cursor);
+      if (err) throw err;
+      // The filter changed (or the list was refreshed) while this page was in
+      // flight — appending it now would splice rows from the old query into
+      // the new list and leave a permanent hole in the keyset range.
+      if (filterGenRef.current !== gen) return;
+      const rows = (data ?? []) as unknown as DbGigFeedRow[];
+      if (rows.length === 0) {
+        setHasMoreFilteredGigs(false);
+        return;
+      }
+      const last = rows[rows.length - 1];
+      filterCursorRef.current = { ts: last.posted_at, id: last.id };
+      const added = rows.map(gigFromFeed);
+      setFilteredGigs((cur) => {
+        const curSeen = new Set((cur ?? []).map((g) => g.id));
+        return [...(cur ?? []), ...added.filter((g) => !curSeen.has(g.id))];
+      });
+      setHasMoreFilteredGigs(rows.length === PAGE_SIZE);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Failed to load more.';
+      console.warn('[posts-store] loadMoreGigFeed failed:', msg);
+    } finally {
+      filterLoadingMoreRef.current = false;
+    }
+  }, [realSession, gigFilter, hasMoreFilteredGigs, gigFilterPage]);
+
+  const gigFeed = useMemo<GigFeedSlice>(() => {
+    if (!gigFilterIsActive(gigFilter)) {
+      return { filter: gigFilter, rows: null, loading: false, error: null, hasMore: false };
+    }
+    if (!realSession) {
+      return {
+        filter: gigFilter,
+        rows: gigs.filter((g) => gigMatchesFilter(g, gigFilter)),
+        loading: false,
+        error: null,
+        hasMore: false,
+      };
+    }
+    return {
+      filter: gigFilter,
+      rows: filteredGigs,
+      loading: filteredGigsLoading,
+      error: filteredGigsError,
+      hasMore: hasMoreFilteredGigs,
+    };
+  }, [
+    gigFilter,
+    realSession,
+    gigs,
+    filteredGigs,
+    filteredGigsLoading,
+    filteredGigsError,
+    hasMoreFilteredGigs,
+  ]);
 
   useEffect(() => {
     fetchAll();
@@ -708,15 +1001,82 @@ export function PostsProvider({ children }: { children: ReactNode }) {
           void handleEvent(payload.new as FeedEvent);
         },
       )
-      .subscribe();
+      .subscribe((status) => {
+        // Fires on every (re)join, not just the first — same pattern as the
+        // messaging hooks. Feed events that fired while the socket was down
+        // (backgrounded phone, laptop lid closed) would otherwise leave the
+        // feed frozen on a stale snapshot until a manual pull-to-refresh.
+        // fetchAll's generation counter makes the extra mount-time call safe.
+        if (status === 'SUBSCRIBED') void fetchAll();
+      });
     return () => {
       supabase.removeChannel(channel);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [realSession]);
+
+  // One-shot lookup for deep links / push taps pointing past the loaded
+  // pages. Merges the row into the store (replace if present, else append —
+  // appending keeps keyset pagination untouched since cursors come from raw
+  // fetched pages, not state). 'missing' is only returned when the server
+  // answered and the view has no such row (deleted, or the author is blocked).
+  async function fetchPostByIdImpl(
+    kind: 'gig' | 'hangout' | 'voice',
+    id: string,
+  ): Promise<PostLookup> {
+    if (!realSession) return 'missing'; // dev/seed data is fully in memory
+    function merge<T extends { id: string }>(
+      setter: (fn: (cur: T[]) => T[]) => void,
+      fresh: T,
+    ) {
+      setter((cur) =>
+        cur.some((x) => x.id === id)
+          ? cur.map((x) => (x.id === id ? fresh : x))
+          : [...cur, fresh],
+      );
+    }
+    try {
+      if (kind === 'gig') {
+        const { data, error: e } = await supabase
+          .from('gigs_feed')
+          .select(GIG_FEED_SELECT)
+          .eq('id', id)
+          .maybeSingle();
+        if (e) return 'error';
+        if (!data) return 'missing';
+        merge(setGigs, gigFromFeed(data as unknown as DbGigFeedRow));
+        return 'found';
+      }
+      if (kind === 'hangout') {
+        const { data, error: e } = await supabase
+          .from('hangouts_feed')
+          .select(HANGOUT_FEED_SELECT)
+          .eq('id', id)
+          .maybeSingle();
+        if (e) return 'error';
+        if (!data) return 'missing';
+        // No hangoutIsLive gate: someone following a link to an expired
+        // hangout should see what it was, not a false "deleted".
+        merge(setHangouts, hangoutFromFeed(data as unknown as DbHangoutFeedRow));
+        return 'found';
+      }
+      const { data, error: e } = await supabase
+        .from('voices_feed')
+        .select(VOICE_FEED_SELECT)
+        .eq('id', id)
+        .maybeSingle();
+      if (e) return 'error';
+      if (!data) return 'missing';
+      merge(setVoices, voiceFromFeed(data as unknown as DbVoiceFeedRow));
+      return 'found';
+    } catch {
+      return 'error';
+    }
+  }
 
   // ─────────────────────── mutations ───────────────────────
 
-  async function addGigImpl(input: AddGigInput): Promise<boolean> {
+  async function addGigImpl(input: AddGigInput): Promise<AddResult> {
     if (!realSession) {
       const now = Date.now();
       const optimistic: Gig = {
@@ -738,6 +1098,15 @@ export function PostsProvider({ children }: { children: ReactNode }) {
       setGigs((cur) => [optimistic, ...cur]);
       return true;
     }
+    // app/post-gig.tsx already normalizes the payout to "$N" within the DB's
+    // range, so null here means a new caller passed something the whole-dollar
+    // contract can't represent. Refuse rather than store a mangled amount —
+    // the old code floored unparseable input to 1 cent and shipped a $0.01 gig.
+    const payoutCents = dollarsToCents(input.payout);
+    if (payoutCents === null) {
+      console.warn('[posts-store] addGig rejected unparseable payout:', input.payout);
+      return 'error';
+    }
     const { data, error: insertErr } = await supabase
       .from('gigs')
       .insert({
@@ -745,7 +1114,7 @@ export function PostsProvider({ children }: { children: ReactNode }) {
         title: input.title,
         description: input.description ?? null,
         category: input.category,
-        payout_cents: dollarsToCents(input.payout),
+        payout_cents: payoutCents,
         location_label: input.where,
         anonymous: input.anonymous,
       })
@@ -753,8 +1122,7 @@ export function PostsProvider({ children }: { children: ReactNode }) {
       .single();
     if (insertErr) {
       console.warn('[posts-store] addGig failed:', insertErr.message);
-      setError(insertErr.message);
-      return false;
+      return insertErr.code === '54000' ? 'rate_limited' : 'error';
     }
     if (data) {
       // The base table can't return identity columns — it's our own post, so
@@ -771,7 +1139,7 @@ export function PostsProvider({ children }: { children: ReactNode }) {
     return true;
   }
 
-  async function addHangoutImpl(input: AddHangoutInput): Promise<boolean> {
+  async function addHangoutImpl(input: AddHangoutInput): Promise<AddResult> {
     if (!realSession) {
       const now = Date.now();
       const optimistic: Hangout = {
@@ -811,8 +1179,7 @@ export function PostsProvider({ children }: { children: ReactNode }) {
       .single();
     if (insertErr) {
       console.warn('[posts-store] addHangout failed:', insertErr.message);
-      setError(insertErr.message);
-      return false;
+      return insertErr.code === '54000' ? 'rate_limited' : 'error';
     }
     // Host is implicitly RSVP'd — insert into attendees so going count = 1.
     if (data) {
@@ -835,7 +1202,7 @@ export function PostsProvider({ children }: { children: ReactNode }) {
     return true;
   }
 
-  async function addVoiceImpl(input: AddVoiceInput): Promise<boolean> {
+  async function addVoiceImpl(input: AddVoiceInput): Promise<AddResult> {
     if (!realSession) {
       const now = Date.now();
       const optimistic: Voice = {
@@ -867,8 +1234,7 @@ export function PostsProvider({ children }: { children: ReactNode }) {
       .single();
     if (insertErr) {
       console.warn('[posts-store] addVoice failed:', insertErr.message);
-      setError(insertErr.message);
-      return false;
+      return insertErr.code === '54000' ? 'rate_limited' : 'error';
     }
     if (data) {
       const fresh = voiceFromFeed({
@@ -883,42 +1249,96 @@ export function PostsProvider({ children }: { children: ReactNode }) {
     return true;
   }
 
-  async function rsvpHangoutImpl(id: string) {
+  async function rsvpHangoutImpl(id: string): Promise<RsvpResult> {
     // The RPC is idempotent server-side (ON CONFLICT DO NOTHING), so a repeat
     // tap never inserts a row — but the optimistic +1 used to fire every time.
     // Only count the join when we know it's the first one.
-    if (myRsvps[id]) return;
-    if (rsvpInFlightRef.current.has(id)) return;
+    if (myRsvps[id]) return { status: 'already', conversationId: null };
+    if (rsvpInFlightRef.current.has(id)) return { status: 'already', conversationId: null };
     if (!realSession) {
       setMyRsvps((cur) => ({ ...cur, [id]: true }));
       setHangouts((cur) =>
         cur.map((h) => (h.id === id ? { ...h, going: h.going + 1 } : h)),
       );
-      return;
+      return { status: 'ok', conversationId: null };
     }
     rsvpInFlightRef.current.add(id);
     try {
       // join_hangout RPC handles attendee insert + group conversation
-      // membership atomically.
-      const { error: rsvpErr } = await supabase.rpc('join_hangout', {
+      // membership atomically, and returns the group conversation id.
+      const { data, error: rsvpErr } = await supabase.rpc('join_hangout', {
         p_hangout_id: id,
       });
       if (rsvpErr) {
         console.warn('[posts-store] rsvp failed:', rsvpErr.message);
-        // Contract error codes: 23514 = capacity, 42501 = blocked vs host.
-        setError(
-          rsvpErr.code === '23514'
-            ? 'This hangout is full.'
-            : rsvpErr.code === '42501'
-              ? "You can't join this hangout."
-              : rsvpErr.message,
-        );
-        return;
+        // Contract §3: 23514 = capacity, 42501 = blocked vs host, P0002 =
+        // hangout gone. Returned to the caller — NOT setError, which the feed
+        // tabs would render as a false "Couldn't load hangouts" banner.
+        return {
+          status:
+            rsvpErr.code === '23514'
+              ? 'full'
+              : rsvpErr.code === '42501'
+                ? 'blocked'
+                : rsvpErr.code === 'P0002'
+                  ? 'not_found'
+                  : 'error',
+          conversationId: null,
+        };
       }
       setMyRsvps((cur) => ({ ...cur, [id]: true }));
       setHangouts((cur) =>
         cur.map((h) => (h.id === id ? { ...h, going: h.going + 1 } : h)),
       );
+      return { status: 'ok', conversationId: (data as string) ?? null };
+    } finally {
+      rsvpInFlightRef.current.delete(id);
+    }
+  }
+
+  async function leaveHangoutImpl(id: string): Promise<LeaveResult> {
+    // Not going in the first place — nothing to undo. Also absorbs the
+    // double-tap that would otherwise fire a second RPC and a second -1.
+    if (!myRsvps[id]) return 'ok';
+    // Shares rsvpInFlightRef with the join path on purpose: a join and a leave
+    // for the same hangout must never be in flight together, or the optimistic
+    // +1/-1 land in an order that doesn't match what the server did.
+    if (rsvpInFlightRef.current.has(id)) return 'ok';
+
+    const dropLocal = () => {
+      setMyRsvps((cur) => {
+        const next = { ...cur };
+        delete next[id];
+        return next;
+      });
+      setHangouts((cur) =>
+        cur.map((h) => (h.id === id ? { ...h, going: Math.max(0, h.going - 1) } : h)),
+      );
+    };
+
+    if (!realSession) {
+      dropLocal();
+      return 'ok';
+    }
+    rsvpInFlightRef.current.add(id);
+    try {
+      const { error: leaveErr } = await supabase.rpc('leave_hangout', {
+        p_hangout_id: id,
+      });
+      if (leaveErr) {
+        console.warn('[posts-store] leave failed:', leaveErr.message);
+        // Contract §3: 22023 = the host cannot leave their own hangout, P0002 =
+        // the hangout is gone. Returned to the caller so the button that was
+        // tapped can explain — NOT setError, which every feed tab renders as a
+        // false "Couldn't load hangouts" banner.
+        return leaveErr.code === '22023'
+          ? 'host'
+          : leaveErr.code === 'P0002'
+            ? 'not_found'
+            : 'error';
+      }
+      dropLocal();
+      return 'ok';
     } finally {
       rsvpInFlightRef.current.delete(id);
     }
@@ -944,26 +1364,58 @@ export function PostsProvider({ children }: { children: ReactNode }) {
 
     if (!realSession) return;
 
-    // Single atomic RPC — `set_voice_vote` handles delete vs upsert in one
-    // transaction so rapid up→down taps can't reorder server-side.
-    const { error: voteErr } = await supabase.rpc('set_voice_vote', {
-      p_voice_id: id,
-      p_value: target,
+    // Record the desired end-state and serialize the server sync per voice.
+    // set_voice_vote is atomic on its own, but two overlapping RPCs (up, then
+    // up-again-to-clear) could still commit out of order and leave the server
+    // at the wrong value. Draining one-at-a-time to the LATEST target prevents
+    // that; a tap that arrives mid-flight just updates the target the running
+    // loop will send next.
+    voteTargetRef.current.set(id, target);
+    if (voteSyncingRef.current.has(id)) return;
+    voteSyncingRef.current.add(id);
+    try {
+      while (voteTargetRef.current.has(id)) {
+        const desired = voteTargetRef.current.get(id)!;
+        voteTargetRef.current.delete(id);
+        const { error: voteErr } = await supabase.rpc('set_voice_vote', {
+          p_voice_id: id,
+          p_value: desired,
+        });
+        if (voteErr) {
+          console.warn('[posts-store] voteVoice failed:', voteErr.message);
+          // Reconcile from server truth rather than replaying an inverse delta
+          // — after several taps the delta no longer describes the divergence.
+          voteTargetRef.current.delete(id);
+          // Server truth visibly snaps the arrow/score back — that IS the
+          // failure feedback. Setting the store-wide error here made all
+          // three feed tabs show a false "Couldn't load" banner.
+          await reconcileVoteFromServer(id);
+          break;
+        }
+      }
+    } finally {
+      voteSyncingRef.current.delete(id);
+    }
+  }
+
+  async function reconcileVoteFromServer(id: string) {
+    if (!session) return;
+    const me = session.user.id;
+    const [voteRes, feedRes] = await Promise.all([
+      supabase.from('voice_votes').select('value').eq('user_id', me).eq('voice_id', id).maybeSingle(),
+      supabase.from('voices_feed').select('vote_score').eq('id', id).maybeSingle(),
+    ]);
+    const serverValue = (voteRes.data as { value: number } | null)?.value;
+    setMyVotes((cur) => {
+      const nextMap = { ...cur };
+      if (serverValue === 1) nextMap[id] = 1;
+      else if (serverValue === -1) nextMap[id] = -1;
+      else delete nextMap[id];
+      return nextMap;
     });
-    if (voteErr) {
-      // Roll back both the score and the highlight so the UI doesn't diverge
-      // from the server on a failed write.
-      console.warn('[posts-store] voteVoice failed:', voteErr.message);
-      setVoices((cur) =>
-        cur.map((v) => (v.id === id ? { ...v, votes: v.votes - delta } : v)),
-      );
-      setMyVotes((cur) => {
-        const nextMap = { ...cur };
-        if (previous === 0) delete nextMap[id];
-        else nextMap[id] = previous;
-        return nextMap;
-      });
-      setError(voteErr.message);
+    const score = (feedRes.data as { vote_score: number } | null)?.vote_score;
+    if (typeof score === 'number') {
+      setVoices((cur) => cur.map((v) => (v.id === id ? { ...v, votes: score } : v)));
     }
   }
 
@@ -978,10 +1430,15 @@ export function PostsProvider({ children }: { children: ReactNode }) {
       hasMore,
       refresh: fetchAll,
       loadMore,
+      gigFeed,
+      setGigFilter,
+      loadMoreGigFeed,
       addGig: addGigImpl,
       addHangout: addHangoutImpl,
       addVoice: addVoiceImpl,
+      fetchPostById: fetchPostByIdImpl,
       rsvpHangout: rsvpHangoutImpl,
+      leaveHangout: leaveHangoutImpl,
       myRsvps,
       myVotes,
       voteVoice: voteVoiceImpl,
@@ -989,7 +1446,22 @@ export function PostsProvider({ children }: { children: ReactNode }) {
     // We intentionally don't depend on the mutation functions; they read state via closures
     // but only state-bound effects (gigs, hangouts, voices) need to drive re-renders.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [gigs, hangouts, voices, hydrated, loading, error, hasMore, myRsvps, myVotes, fetchAll, loadMore],
+    [
+      gigs,
+      hangouts,
+      voices,
+      hydrated,
+      loading,
+      error,
+      hasMore,
+      myRsvps,
+      myVotes,
+      fetchAll,
+      loadMore,
+      gigFeed,
+      setGigFilter,
+      loadMoreGigFeed,
+    ],
   );
 
   return <PostsContext.Provider value={value}>{children}</PostsContext.Provider>;

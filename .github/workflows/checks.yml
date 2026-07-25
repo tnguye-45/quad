@@ -1,0 +1,47 @@
+# quad — CI checks: typecheck, lint, unit tests, DB-contract / legal-sync /
+# migration-bundle greps.
+#
+# Runs on every push and PR. deploy.yml runs the same checks as a gate before
+# building, so a red build can never reach GitHub Pages.
+name: Checks
+
+on:
+  push:
+    branches-ignore: [main] # main is covered by the gate inside deploy.yml
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Lint
+        run: npx eslint app lib components hooks constants scripts
+
+      - name: Test
+        run: npx jest --ci
+
+      - name: DB contract check
+        run: node scripts/check-contract.mjs
+
+      - name: Legal sync check
+        run: node scripts/check-legal-sync.mjs
+
+      - name: Migration bundle freshness
+        run: node scripts/check-bundle-fresh.mjs

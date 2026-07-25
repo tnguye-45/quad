@@ -6,7 +6,8 @@
 // Contract notes (supabase/CLIENT_CONTRACT.md, 0023–0032):
 //   * hangout_attendees is own-rows-only now, so co-attendance comes from
 //     conversation_members of MY conversations — which RLS already scopes to
-//     me, giving exactly ego-graph semantics for free.
+//     me, giving exactly ego-graph semantics for free. Groups from ANONYMOUS
+//     hangouts are dropped: their membership list names the masked host (0038).
 //   * gig work ties read gigs_feed (accepted_by is granted; poster_id arrives
 //     pre-masked, so an anonymous poster can never leak into the graph).
 //   * profiles is an open directory (0002), so ambient overlap filters it
@@ -81,9 +82,11 @@ function normalize(value: string | null | undefined): string {
 }
 
 /** Values interpolated into a PostgREST .or() must be double-quoted (dorm
- *  names contain spaces); embedded quotes would break out of the literal. */
+ *  names contain spaces); embedded quotes would break out of the literal. A
+ *  trailing backslash escapes the CLOSING quote and breaks out the same way, so
+ *  strip both characters — profile text has no legitimate use for either. */
 function orLiteral(value: string): string {
-  return `"${value.replace(/"/g, "")}"`;
+  return `"${value.replace(/["\\]/g, "")}"`;
 }
 
 function normalizeProfile(row: Profile): Profile {
@@ -232,6 +235,10 @@ export async function fetchOrbitSources(me: Profile): Promise<OrbitSources> {
       .eq("accepted_by", me.id),
   ]);
   if (convRes.error) throw convRes.error;
+  // The block list gates who may appear on the orbit graph. If it fails we must
+  // NOT silently fall back to an empty list — that would surface a blocked user
+  // as a node. Fail the whole graph instead (the caller shows a retry).
+  if (blocksRes.error) throw blocksRes.error;
 
   const convs = (convRes.data ?? []) as {
     id: string;
@@ -258,13 +265,48 @@ export async function fetchOrbitSources(me: Profile): Promise<OrbitSources> {
     membersByConv.set(row.conversation_id, list);
   }
 
+  // 0038 stops anonymous hangouts from forming a group conversation at all, but
+  // conversations created before it can still exist — and their membership list
+  // contains the anonymous host. Rendering that group would put the host on their
+  // own attendee's map, by name, tagged "hung out": exactly the leak 0027's masking
+  // exists to prevent. Identify those hangouts through hangouts_feed, where
+  // host_id is NULL precisely when the row is anonymous and not the caller's own.
+  const hangoutIds = [
+    ...new Set(convs.map((c) => c.hangout_id).filter((id): id is string => !!id)),
+  ];
+  const maskedHangoutIds = new Set<string>();
+  if (hangoutIds.length > 0) {
+    const { data, error } = await supabase
+      .from("hangouts_feed")
+      .select("id, anonymous, host_id")
+      .in("id", hangoutIds);
+    // Fail the whole graph rather than degrade: without the anonymity flags we
+    // cannot tell a safe group from a leaking one, and guessing wrong publishes a
+    // name that was promised to stay hidden.
+    if (error) throw error;
+    const rows = (data ?? []) as {
+      id: string;
+      anonymous: boolean;
+      host_id: string | null;
+    }[];
+    for (const h of rows) {
+      if (h.anonymous && h.host_id === null) maskedHangoutIds.add(h.id);
+    }
+    // A hangout the view didn't return at all (deleted, or its host is blocked) is
+    // an unknown, and an unknown is treated as masked.
+    const returned = new Set(rows.map((h) => h.id));
+    for (const id of hangoutIds) if (!returned.has(id)) maskedHangoutIds.add(id);
+  }
+
   const hangoutGroups: string[][] = [];
   const gigChatIds: string[] = [];
   for (const conv of convs) {
     const members = membersByConv.get(conv.id) ?? [];
     if (members.length === 0) continue;
-    if (conv.hangout_id) hangoutGroups.push(members);
-    else if (conv.gig_id) gigChatIds.push(...members);
+    if (conv.hangout_id) {
+      if (maskedHangoutIds.has(conv.hangout_id)) continue;
+      hangoutGroups.push(members);
+    } else if (conv.gig_id) gigChatIds.push(...members);
   }
 
   const workedIds: string[] = [];

@@ -75,10 +75,14 @@ export default function PostGigScreen() {
         posterInitials: profile?.initials ?? null,
         posterAvatarUrl: profile?.avatar_url ?? null,
       });
-      if (!ok) {
-        // The store swallows insert errors into its own state; keep the compose
-        // screen open with the typed content instead of popping as if it saved.
-        setErr("Couldn't post your gig. Check your connection and try again.");
+      if (ok !== true) {
+        // Keep the compose screen open with the typed content instead of
+        // popping as if it saved.
+        setErr(
+          ok === 'rate_limited'
+            ? "You're posting a lot right now — try again in a bit."
+            : "Couldn't post your gig. Check your connection and try again.",
+        );
         return;
       }
       router.back();

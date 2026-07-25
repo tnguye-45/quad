@@ -1,0 +1,62 @@
+-- quad — one push-token row per DEVICE, not per user
+--
+-- 0009 made user_id the PRIMARY KEY of public.user_push_tokens, and
+-- lib/notifications.ts upserts with onConflict: 'user_id'. That silently
+-- assumes one student = one device, which is wrong the moment anyone owns a
+-- phone and an iPad.
+--
+-- Failure scenario: a student installs quad on their iPhone, then on their
+-- iPad. The iPad's registration OVERWRITES the iPhone's row. Every push now
+-- goes to the iPad only; on the phone it reads as "notifications are broken"
+-- with no diagnostic anywhere — no error, no log, nothing the student or we
+-- could see. Worse, signing out on the iPad calls clearPushToken(user_id),
+-- which deletes by user_id and therefore kills BOTH devices until the phone
+-- happens to re-register on its next launch.
+--
+-- Fix: primary key (user_id, expo_push_token) — the row identifies a device
+-- install, not a person. Fan-out already reads user_push_tokens as a list and
+-- batches by 100, so multiple rows per user need no change on the read side.
+--
+-- Rejected alternatives:
+--   * Make expo_push_token the sole primary key ("a device belongs to exactly
+--     one account"). Superficially tidier, but it breaks the client: when a
+--     second student signs in on a shared device, their upsert would have to
+--     UPDATE a row whose user_id is someone else's, and the 0009 RLS policies
+--     are all `user_id = auth.uid()` — the write is denied and that student
+--     silently never registers. The composite key keeps every write inside the
+--     writer's own rows.
+--   * A separate user_devices table with a device_id. More faithful modelling,
+--     but nothing in the app has a stable device identifier to key it on, and
+--     the Expo token is already exactly "this install of this app".
+--
+-- No dedupe step is needed before adding the key: user_id was the PK, so there
+-- is at most one row per user today and the composite key cannot collide.
+--
+-- Do NOT add a separate index on user_id. The composite PK's index leads with
+-- user_id, so every existing lookup (`user_id=eq.…`, `user_id=in.(…)` in the
+-- three push functions, `user_id=eq.…` in delete-account) uses it. A standalone
+-- user_id index would be pure write cost.
+--
+-- RLS is unchanged and stays correct: all four 0009 policies are
+-- `user_id = auth.uid()`, which is a per-row test that does not care how the
+-- table is keyed.
+--
+-- Consequence to be aware of: Expo rotates a token when the app is reinstalled,
+-- so a user who reinstalls leaves a dead row behind instead of overwriting it.
+-- That is what the DeviceNotRegistered receipt handling in the three push
+-- functions is for — it now deletes the one dead row rather than the user's
+-- whole set. `updated_at` is still maintained on every registration if we ever
+-- want a staleness sweep on top.
+--
+-- Client-visible breakage: an upsert with `onConflict: 'user_id'` stops
+-- working the moment this migration lands (PostgREST returns 42P10 — "there is
+-- no unique constraint matching the ON CONFLICT specification"). The matching
+-- client change is in lib/notifications.ts in this same batch; ship the two
+-- together. Old app builds already in someone's hands keep receiving pushes
+-- from their existing row, but stop being able to re-register.
+
+alter table public.user_push_tokens
+  drop constraint if exists user_push_tokens_pkey;
+
+alter table public.user_push_tokens
+  add primary key (user_id, expo_push_token);

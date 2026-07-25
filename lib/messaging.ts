@@ -494,6 +494,11 @@ export function useThread(conversationId: string | undefined): {
   partnerName: string;
   partnerInitials: string;
   partnerAvatarUrl: string | null;
+  /** True when the counterpart is an anonymous author we're masking. Callers MUST
+   *  withhold their user id from anything that would reveal it — the block insert
+   *  and the report params both take a raw uid, and the public profiles directory
+   *  turns one into a name. */
+  partnerIsMasked: boolean;
   messages: Message[];
   loading: boolean;
   error: string | null;
@@ -515,6 +520,7 @@ export function useThread(conversationId: string | undefined): {
   const [partnerName, setPartnerName] = useState('Conversation');
   const [partnerInitials, setPartnerInitials] = useState('?');
   const [partnerAvatarUrl, setPartnerAvatarUrl] = useState<string | null>(null);
+  const [partnerIsMasked, setPartnerIsMasked] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [otherReads, setOtherReads] = useState<MemberReadState[]>([]);
@@ -567,6 +573,9 @@ export function useThread(conversationId: string | undefined): {
     }
     setLoading(true);
     setError(null);
+    // Fail closed while the new thread loads: an unmasked flag left over from the
+    // previous conversation would expose this one's counterpart for a frame.
+    setPartnerIsMasked(true);
 
     const hydrateOtherReads = async () => {
       const { data, error: err } = await supabase
@@ -647,6 +656,9 @@ export function useThread(conversationId: string | undefined): {
         // anonymous-and-not-me. In a 1:1 that's exact; in a group it's
         // conservative (better to over-mask than leak).
         const partnerIsAnon = !!partner && !!convRow && anonymousAuthorIsOther(convRow);
+        // Set unconditionally: a thread with no counterpart row must clear the flag
+        // rather than inherit the previous conversation's value.
+        setPartnerIsMasked(partnerIsAnon);
         if (partnerIsAnon) {
           // Anonymous hangout host: never surface their real identity in the
           // chat header.
@@ -682,8 +694,11 @@ export function useThread(conversationId: string | undefined): {
       } catch (e: unknown) {
         if (!mounted) return;
         const msg = e instanceof Error ? e.message : 'Failed to load thread.';
+        // The raw text goes to the log, not the screen: this state is rendered
+        // verbatim in the chat's error bar, and PostgREST/RLS messages read like a
+        // crash to a student.
         console.warn('[messaging] useThread failed:', msg);
-        setError(msg);
+        setError("Couldn't load this conversation. Check your connection.");
       } finally {
         if (mounted) setLoading(false);
       }
@@ -923,7 +938,7 @@ export function useThread(conversationId: string | undefined): {
       .eq('sender_id', session!.user.id);
     if (delErr) {
       console.warn('[messaging] deleteMessages failed:', delErr.message);
-      setError(delErr.message);
+      setError("Couldn't delete. Check your connection and try again.");
       return false;
     }
     setMessages((cur) => cur.filter((m) => !ids.includes(m.id)));
@@ -972,6 +987,7 @@ export function useThread(conversationId: string | undefined): {
       partnerName,
       partnerInitials,
       partnerAvatarUrl,
+      partnerIsMasked,
       messages,
       loading,
       error,
@@ -987,6 +1003,7 @@ export function useThread(conversationId: string | undefined): {
       partnerName,
       partnerInitials,
       partnerAvatarUrl,
+      partnerIsMasked,
       messages,
       loading,
       error,
@@ -1028,33 +1045,31 @@ export async function findOrCreateGigConversation(args: {
     : { ok: false, code: 'error' };
 }
 
-export type JoinHangoutResult =
-  | { ok: true; conversationId: string | null }
-  | { ok: false; code: 'full' | 'blocked' | 'not_found' | 'error' };
+// NOTE: there is deliberately no `joinHangout` wrapper here. RSVP goes through
+// posts-store's `rsvpHangoutImpl`, which calls the join_hangout RPC directly and
+// owns the optimistic going-count and the myRsvps guard; a second entry point was
+// only ever used to re-resolve a conversation id, and that is now
+// `hangoutConversationId` below — a read, not a mutation.
 
-// RSVP to a hangout and join its group conversation in one atomic call.
-// Contract §3: 23514 = capacity trigger says the hangout is full; 42501 =
-// block vs the host; P0002 = hangout no longer exists.
-export async function joinHangout(hangoutId: string): Promise<JoinHangoutResult> {
-  const { data, error } = await supabase.rpc('join_hangout', {
+/**
+ * Read-only lookup of a hangout's group conversation. Returns null when the
+ * hangout has no conversation (it's anonymous — 0038 refuses to create one), when
+ * the caller isn't a member, or on error; callers can't distinguish those and
+ * shouldn't need to.
+ *
+ * This exists so opening a chat stops going through `join_hangout`. Using a
+ * mutation as a lookup is what made the 0029 capacity bug fatal: every attendee of
+ * a full hangout got 23514 on a read they were entitled to.
+ */
+export async function hangoutConversationId(hangoutId: string): Promise<string | null> {
+  const { data, error } = await supabase.rpc('hangout_conversation_id', {
     p_hangout_id: hangoutId,
   });
   if (error) {
-    console.warn('[messaging] join_hangout failed:', error.message);
-    const code = (error as { code?: string }).code;
-    return {
-      ok: false,
-      code:
-        code === '23514'
-          ? 'full'
-          : code === '42501'
-            ? 'blocked'
-            : code === 'P0002'
-              ? 'not_found'
-              : 'error',
-    };
+    console.warn('[messaging] hangout_conversation_id failed:', error.message);
+    return null;
   }
-  return { ok: true, conversationId: (data as string) ?? null };
+  return (data as string) ?? null;
 }
 
 export async function leaveHangout(hangoutId: string): Promise<boolean> {

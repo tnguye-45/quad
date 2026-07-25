@@ -10,8 +10,9 @@ import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useAuth } from '@/lib/auth-context';
+import { confirmAsync } from '@/lib/confirm';
 import { useDevConversations } from '@/lib/dev-conversations';
-import { joinHangout } from '@/lib/messaging';
+import { hangoutConversationId } from '@/lib/messaging';
 import { usePosts, type PostLookup } from '@/lib/posts-store';
 
 const VIBE_EMOJI: Record<string, string> = {
@@ -25,13 +26,15 @@ const VIBE_EMOJI: Record<string, string> = {
 export default function HangoutDetailScreen() {
   const c = Colors[useColorScheme() ?? 'light'];
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { hangouts, rsvpHangout, hydrated, fetchPostById, myRsvps } = usePosts();
+  const { hangouts, rsvpHangout, leaveHangout, hydrated, fetchPostById, myRsvps } =
+    usePosts();
   const { session, isDev } = useAuth();
   const realSession = !!session && !isDev;
   const { joinHangoutConversation } = useDevConversations();
   const hangout = hangouts.find((h) => h.id === id);
   const [joining, setJoining] = useState(false);
   const [joined, setJoined] = useState(false);
+  const [leaving, setLeaving] = useState(false);
   const [convId, setConvId] = useState<string | null>(null);
   const [joinErr, setJoinErr] = useState<string | null>(null);
 
@@ -125,6 +128,12 @@ export default function HangoutDetailScreen() {
   // A join from a previous session (or from the feed card) lives in myRsvps —
   // without it this screen re-offered "I'm in" to people already going.
   const isJoined = joined || !!myRsvps[hangout.id];
+  // 0038: an anonymous hangout forms no group conversation. Its membership row
+  // would name the host to every attendee — conversation_members is readable to
+  // members and the profiles directory is public — which is the identity the
+  // anonymous flag exists to protect. RSVP still works; there is simply nothing to
+  // open. Enforced server-side; mirrored in dev mode so the demo matches the product.
+  const hasGroupChat = !hangout.anonymous;
   const hostLabel =
     hangout.anonymous || !hangout.hostName ? 'Anonymous host' : hangout.hostName;
   const hostInitials =
@@ -157,23 +166,22 @@ export default function HangoutDetailScreen() {
         setJoinErr("Couldn't RSVP. Check your connection and try again.");
         return;
       }
-      // 'ok' carries the conversation id from the RPC; dev mode and 'already'
-      // (joined earlier, id not cached) resolve it here.
-      let cid = res.conversationId;
-      if (!cid) {
-        if (realSession) {
-          const jr = await joinHangout(hangout.id);
-          cid = jr.ok ? jr.conversationId : null;
-        } else {
-          cid = joinHangoutConversation(hangout);
-        }
-      }
-      if (!cid) {
-        setJoinErr("Couldn't join the group chat. Try again.");
-        return;
-      }
-      setConvId(cid);
+      // The RSVP landed — that is the thing the user asked for, so commit it before
+      // touching the chat. An anonymous hangout has no conversation to resolve, and
+      // a null id there is the EXPECTED outcome rather than a failure; treating it
+      // as one used to leave a successful join showing "Couldn't join the group
+      // chat. Try again."
       setJoined(true);
+      if (!hasGroupChat) return;
+      // 'ok' carries the conversation id from the RPC; dev mode and 'already'
+      // (joined earlier, id not cached) resolve it here. A miss is not fatal —
+      // openGroupChat retries the lookup on demand.
+      const cid =
+        res.conversationId ??
+        (realSession
+          ? await hangoutConversationId(hangout.id)
+          : joinHangoutConversation(hangout));
+      if (cid) setConvId(cid);
     } catch {
       setJoinErr("Couldn't RSVP. Check your connection and try again.");
     } finally {
@@ -181,16 +189,54 @@ export default function HangoutDetailScreen() {
     }
   }
 
+  async function onLeave() {
+    if (!hangout || isOwn || leaving) return;
+    const confirmed = await confirmAsync({
+      title: 'Leave this hangout?',
+      message: hasGroupChat
+        ? "You'll be removed from the group chat too. You can rejoin if there's still room."
+        : "You can rejoin if there's still room.",
+      confirmLabel: 'Leave',
+      destructive: true,
+    });
+    if (!confirmed) return;
+    setLeaving(true);
+    setJoinErr(null);
+    try {
+      const res = await leaveHangout(hangout.id);
+      if (res === 'host') {
+        setJoinErr("You're hosting this one — cancel it instead of leaving.");
+        return;
+      }
+      if (res === 'not_found') {
+        setJoinErr('This hangout no longer exists.');
+        return;
+      }
+      if (res === 'error') {
+        setJoinErr("Couldn't leave. Check your connection and try again.");
+        return;
+      }
+      // Left. Drop the cached conversation id — membership is gone, so the chat
+      // is no longer ours to open, and a stale id would push into a thread the
+      // server now refuses.
+      setConvId(null);
+      setJoined(false);
+    } finally {
+      setLeaving(false);
+    }
+  }
+
   async function openGroupChat() {
-    if (!hangout) return;
+    if (!hangout || !hasGroupChat) return;
     let cid = convId;
     if (!cid) {
-      if (realSession) {
-        const jr = await joinHangout(hangout.id);
-        cid = jr.ok ? jr.conversationId : null;
-      } else {
-        cid = joinHangoutConversation(hangout);
-      }
+      // Read-only lookup. This used to call join_hangout purely for its return
+      // value, and that RPC's capacity check had no exemption for someone already
+      // in — so the moment a hangout filled up, every existing attendee was locked
+      // out of their own group chat by a 23514 that no amount of retrying cleared.
+      cid = realSession
+        ? await hangoutConversationId(hangout.id)
+        : joinHangoutConversation(hangout);
       setConvId(cid);
     }
     if (cid) router.push(`/chat/${cid}` as never);
@@ -288,17 +334,52 @@ export default function HangoutDetailScreen() {
                   {"you're hosting · "}{hangout.going} going
                 </ThemedText>
               ) : null}
-              <Pressable
-                onPress={openGroupChat}
-                accessibilityRole="button"
-                style={({ pressed }) => [
-                  styles.cta,
-                  { backgroundColor: c.tint, opacity: pressed ? 0.85 : 1 },
-                ]}>
-                <ThemedText style={[styles.ctaText, { color: c.background }]}>
-                  Open group chat
-                </ThemedText>
-              </Pressable>
+              {hasGroupChat ? (
+                <Pressable
+                  onPress={openGroupChat}
+                  accessibilityRole="button"
+                  style={({ pressed }) => [
+                    styles.cta,
+                    { backgroundColor: c.tint, opacity: pressed ? 0.85 : 1 },
+                  ]}>
+                  <ThemedText style={[styles.ctaText, { color: c.background }]}>
+                    Open group chat
+                  </ThemedText>
+                </Pressable>
+              ) : (
+                <View
+                  style={[
+                    styles.ctaDisabled,
+                    { borderColor: c.border, backgroundColor: c.subtle },
+                  ]}>
+                  <ThemedText
+                    style={[styles.ctaDisabledText, { color: c.textMuted }]}
+                    type="mono">
+                    anonymous · no group chat
+                  </ThemedText>
+                </View>
+              )}
+              {/* The host can't leave their own hangout (the RPC refuses with
+                  22023) — they cancel it instead. */}
+              {!isOwn ? (
+                <Pressable
+                  onPress={onLeave}
+                  disabled={leaving}
+                  accessibilityRole="button"
+                  accessibilityLabel="Leave this hangout"
+                  accessibilityState={{ disabled: leaving, busy: leaving }}
+                  hitSlop={8}
+                  style={({ pressed }) => [
+                    styles.leaveBtn,
+                    { opacity: leaving ? 0.4 : pressed ? 0.5 : 1 },
+                  ]}>
+                  <ThemedText
+                    style={[styles.leaveText, { color: c.textMuted }]}
+                    type="mono">
+                    {leaving ? 'leaving…' : "leave hangout"}
+                  </ThemedText>
+                </Pressable>
+              ) : null}
             </>
           ) : (
             <Pressable
@@ -449,6 +530,12 @@ const styles = StyleSheet.create({
   },
   ctaDisabledText: {
     fontSize: 11,
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
+  },
+  leaveBtn: { paddingVertical: 8, alignItems: 'center' },
+  leaveText: {
+    fontSize: 10,
     letterSpacing: 1.2,
     textTransform: 'uppercase',
   },

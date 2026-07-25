@@ -175,6 +175,7 @@ function RealChat({
     partnerName,
     partnerInitials,
     partnerAvatarUrl,
+    partnerIsMasked,
     loading,
     error,
     send,
@@ -350,6 +351,15 @@ function RealChat({
       ? `Hangout · ${conversation.hangout.title}`
       : 'Conversation';
 
+  // A masked counterpart is an anonymous author (an anonymous hangout host, on a
+  // thread created before 0038 stopped those chats existing). `otherReads` still
+  // carries their REAL uid — conversation_members is readable to every member — so
+  // it must never reach the block insert or the report params, where the public
+  // profiles directory turns a uid straight back into a name. Fall back to
+  // reporting the hangout; ChatHeaderMenu hides Block on its own when
+  // otherUserId is empty.
+  const canActOnPartner = otherReads.length === 1 && !partnerIsMasked;
+
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <KeyboardAvoidingView
@@ -365,17 +375,18 @@ function RealChat({
             right={
               <ChatHeaderMenu
                 conversationId={conversationId}
-                // Only a 1:1 thread has a single counterpart to block; in a
-                // hangout group chat the menu is report-only.
-                otherUserId={otherReads.length === 1 ? otherReads[0].userId : ''}
-                otherUserName={otherReads.length === 1 ? partnerName : undefined}
+                // Only a 1:1 thread with an UNMASKED counterpart has someone to
+                // block; a group chat, or a masked anonymous author, is
+                // report-only (see canActOnPartner).
+                otherUserId={canActOnPartner ? otherReads[0].userId : ''}
+                otherUserName={canActOnPartner ? partnerName : undefined}
                 // Report a real target: the counterpart's profile in a 1:1
-                // thread, the hangout in a group chat. (The old default —
-                // targetKind "message" + a conversation id — always failed the
-                // server resolver, which expects a message id.)
-                targetKind={otherReads.length === 1 ? 'profile' : 'hangout'}
+                // thread, the hangout otherwise. (The old default — targetKind
+                // "message" + a conversation id — always failed the server
+                // resolver, which expects a message id.)
+                targetKind={canActOnPartner ? 'profile' : 'hangout'}
                 targetId={
-                  otherReads.length === 1
+                  canActOnPartner
                     ? otherReads[0].userId
                     : conversation?.hangout_id ?? ''
                 }
@@ -503,11 +514,16 @@ function RealChat({
             </View>
           ) : null}
 
+          {/* Render the real message. useThread already maps the codes that
+              matter to user-facing copy (42501 = blocked, 54000 = rate limited);
+              the old hardcoded "check your connection" told a blocked user their
+              wifi was bad and left them retrying forever, and said "couldn't
+              send" when the failure was actually a failed thread LOAD. */}
           {error ? (
             <View style={[styles.errorBar, { borderTopColor: c.border }]}>
               <IconSymbol name="exclamationmark.triangle" size={13} color={c.danger} />
               <ThemedText style={[styles.errorText, { color: c.danger }]} type="mono">
-                couldn&apos;t send — check your connection
+                {error}
               </ThemedText>
             </View>
           ) : null}
